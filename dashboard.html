@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FridayTrader</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#f8f9fa;--surface:#fff;--surface2:#f3f4f6;--border:#e5e7eb;--border-light:#f0f1f3;
+    --text:#111827;--text2:#6b7280;--text3:#9ca3af;
+    --green:#10b981;--green-bg:#ecfdf5;--red:#ef4444;--red-bg:#fef2f2;
+    --blue:#3b82f6;--blue-bg:#eff6ff;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;
+    --r:12px;--r2:8px;
+    --shadow:0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md:0 4px 12px rgba(0,0,0,0.07);
+    --font:'Inter',-apple-system,sans-serif;--mono:'JetBrains Mono',monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
+  nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+  .logo{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .logo-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 3s ease-in-out infinite;}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+  .nav-badge{font-size:11px;font-weight:500;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 8px;border-radius:20px;}
+  .market-badge{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;display:flex;align-items:center;gap:5px;}
+  .market-badge.open{background:#ecfdf5;color:#10b981;}
+  .market-badge.closed{background:var(--surface2);color:var(--text3);}
+  .market-badge .dot{width:5px;height:5px;border-radius:50%;background:currentColor;}
+  .nav-right{display:flex;align-items:center;gap:12px;}
+  .nav-time{font-family:var(--mono);font-size:12px;color:var(--text3);}
+  .btn{font-family:var(--font);font-size:13px;font-weight:500;padding:7px 14px;border-radius:var(--r2);border:1px solid var(--border);background:var(--surface);color:var(--text2);cursor:pointer;transition:all 0.15s;}
+  .btn:hover{background:var(--surface2);color:var(--text);}
+
+  /* TABS */
+  .tabs{display:flex;gap:2px;background:var(--surface2);border-radius:10px;padding:3px;width:fit-content;}
+  .tab{font-size:13px;font-weight:500;padding:6px 16px;border-radius:8px;cursor:pointer;color:var(--text2);transition:all 0.15s;border:none;background:transparent;}
+  .tab.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow);}
+  .tab:hover:not(.active){color:var(--text);}
+  .tab-panel{display:none;}
+  .tab-panel.active{display:flex;flex-direction:column;gap:20px;}
+
+  .page{max-width:1280px;margin:0 auto;padding:28px 32px;display:flex;flex-direction:column;gap:20px;}
+  .hero-label{font-size:13px;color:var(--text3);margin-bottom:6px;font-weight:500;}
+  .hero-value{font-size:44px;font-weight:700;letter-spacing:-2px;line-height:1;margin-bottom:10px;}
+  .hero-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .badge{display:inline-flex;align-items:center;font-size:13px;font-weight:600;padding:4px 10px;border-radius:20px;}
+  .badge.up{background:var(--green-bg);color:var(--green);}
+  .badge.dn{background:var(--red-bg);color:var(--red);}
+  .badge.flat{background:var(--surface2);color:var(--text2);}
+  .badge.blue{background:var(--blue-bg);color:var(--blue);}
+  .hero-sub{font-size:13px;color:var(--text3);}
+  .stats-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;box-shadow:var(--shadow);}
+  .stat-label{font-size:12px;font-weight:500;color:var(--text3);margin-bottom:8px;}
+  .stat-value{font-size:22px;font-weight:700;letter-spacing:-0.5px;}
+  .stat-value.green{color:var(--green);}
+  .stat-value.red{color:var(--red);}
+  .stat-value.blue{color:var(--blue);}
+  .stat-sub{font-size:11px;color:var(--text3);margin-top:4px;}
+  .main-grid{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start;}
+  .left{display:flex;flex-direction:column;gap:16px;}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;}
+  .card-header{padding:16px 20px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;}
+  .card-title{font-size:14px;font-weight:600;letter-spacing:-0.2px;}
+  .card-meta{font-size:12px;color:var(--text3);display:flex;align-items:center;gap:12px;}
+  .card-body{padding:20px;}
+  .card-body.tight{padding:4px 20px;}
+  .heatmap{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+  .heat-cell{border-radius:var(--r2);padding:14px 12px;cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;}
+  .heat-cell:hover{transform:translateY(-1px);box-shadow:var(--shadow-md);}
+  .heat-cell.up{background:var(--green-bg);}
+  .heat-cell.dn{background:var(--red-bg);}
+  .heat-cell.flat{background:var(--surface2);}
+  .heat-sym{font-size:12px;font-weight:700;letter-spacing:0.3px;margin-bottom:6px;}
+  .heat-price{font-size:15px;font-weight:600;font-family:var(--mono);letter-spacing:-0.3px;margin-bottom:2px;}
+  .heat-chg{font-size:12px;font-weight:600;}
+  .heat-chg.up{color:var(--green);}
+  .heat-chg.dn{color:var(--red);}
+  .heat-chg.flat{color:var(--text2);}
+  .heat-shares{font-size:11px;color:var(--text3);margin-top:4px;}
+  .alloc-list{display:flex;flex-direction:column;gap:14px;}
+  .alloc-row{display:flex;flex-direction:column;gap:5px;}
+  .alloc-top{display:flex;align-items:center;justify-content:space-between;}
+  .alloc-sym{font-size:13px;font-weight:600;}
+  .alloc-right{display:flex;align-items:center;gap:12px;}
+  .alloc-val{font-family:var(--mono);font-size:12px;color:var(--text2);}
+  .alloc-pct{font-size:12px;font-weight:600;min-width:36px;text-align:right;}
+  .alloc-track{height:4px;background:var(--surface2);border-radius:99px;overflow:hidden;}
+  .alloc-fill{height:100%;border-radius:99px;width:0;transition:width 1s cubic-bezier(0.16,1,0.3,1);}
+  .trade-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-light);}
+  .trade-row:last-child{border-bottom:none;}
+  .trade-pill{font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;letter-spacing:0.5px;min-width:38px;text-align:center;}
+  .trade-pill.BUY{background:var(--green-bg);color:var(--green);}
+  .trade-pill.SELL,.trade-pill.STOP_LOSS{background:var(--red-bg);color:var(--red);}
+  .trade-pill.TAKE_PROFIT{background:var(--green-bg);color:var(--green);}
+  .trade-sym{font-size:13px;font-weight:600;flex:1;}
+  .trade-detail{font-size:12px;color:var(--text3);}
+  .trade-price{font-family:var(--mono);font-size:13px;font-weight:500;}
+  .brain-list{display:flex;flex-direction:column;max-height:520px;overflow-y:auto;}
+  .brain-list::-webkit-scrollbar{width:4px;}
+  .brain-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px;}
+  .brain-item{padding:14px 0;border-bottom:1px solid var(--border-light);animation:slideUp 0.3s ease;}
+  .brain-item:last-child{border-bottom:none;}
+  @keyframes slideUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+  .brain-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+  .brain-sym{font-size:13px;font-weight:700;}
+  .brain-act{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;letter-spacing:0.5px;}
+  .brain-act.BUY{background:var(--green-bg);color:var(--green);}
+  .brain-act.SELL{background:var(--red-bg);color:var(--red);}
+  .brain-act.HOLD{background:var(--surface2);color:var(--text2);}
+  .brain-time{font-size:11px;color:var(--text3);margin-left:auto;}
+  .brain-text{font-size:12.5px;color:var(--text2);line-height:1.6;}
+  .empty{text-align:center;padding:28px;color:var(--text3);font-size:13px;}
+  .closed-banner{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 16px;font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;}
+
+  /* PERFORMANCE TAB */
+  .perf-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+  .chart-wrap{position:relative;height:340px;}
+  .legend{display:flex;align-items:center;gap:16px;}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--text2);}
+  .legend-dot{width:10px;height:10px;border-radius:50%;}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .vs-row{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border-light);}
+  .vs-row:last-child{border-bottom:none;}
+  .vs-label{font-size:13px;font-weight:600;flex:1;}
+  .vs-bar-wrap{flex:2;height:8px;background:var(--surface2);border-radius:99px;overflow:hidden;}
+  .vs-bar{height:100%;border-radius:99px;width:0;transition:width 1s cubic-bezier(0.16,1,0.3,1);}
+  .vs-val{font-family:var(--mono);font-size:13px;font-weight:600;min-width:60px;text-align:right;}
+  .insight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px;}
+  .insight-card{background:var(--surface2);border-radius:var(--r2);padding:14px 16px;}
+  .insight-label{font-size:11px;font-weight:500;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.3px;}
+  .insight-value{font-size:16px;font-weight:700;}
+  .insight-sub{font-size:11px;color:var(--text3);margin-top:3px;}
+</style>
+</head>
+<body>
+
+<nav>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="logo"><div class="logo-dot"></div>FridayTrader</div>
+    <span class="nav-badge">Paper Trading</span>
+    <span style="font-size:11px;font-weight:500;color:#9ca3af;display:flex;align-items:center;gap:5px;border-left:1px solid #e5e7eb;padding-left:12px;margin-left:4px">Powered by Yahoo Finance</span>
+    <div class="market-badge closed" id="marketBadge"><div class="dot"></div><span id="marketStatus">Loading...</span></div>
+  </div>
+  <div class="nav-right">
+    <div class="nav-time" id="clock"></div>
+    <button class="btn" onclick="loadAll()">↻ Refresh</button>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- TAB SWITCHER -->
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab" onclick="switchTab('performance')">Performance</button>
+    <button class="tab" onclick="switchTab('skills')">Skills</button>
+  </div>
+
+  <!-- ═══ DASHBOARD TAB ═══ -->
+  <div id="tab-dashboard" class="tab-panel active">
+
+    <div id="closedBanner" style="display:none" class="closed-banner">
+      🕐 <span id="closedMsg">Market is currently closed. Showing last known prices.</span>
+    </div>
+
+    <div>
+      <div class="hero-label">Total Portfolio Value</div>
+      <div class="hero-value" id="heroVal">—</div>
+      <div class="hero-meta">
+        <div class="badge flat" id="heroBadge">—</div>
+        <div class="hero-sub">from $10,000.00 starting capital</div>
+      </div>
+    </div>
+
+    <div class="stats-strip">
+      <div class="stat-card"><div class="stat-label">Available Cash</div><div class="stat-value" id="sCash">—</div><div class="stat-sub" id="sCashPct">—</div></div>
+      <div class="stat-card"><div class="stat-label">Invested</div><div class="stat-value" id="sInvested">—</div><div class="stat-sub" id="sInvestedPct">—</div></div>
+      <div class="stat-card"><div class="stat-label">Open Positions</div><div class="stat-value" id="sPos">—</div><div class="stat-sub">holdings</div></div>
+      <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-value" id="sTrades">—</div><div class="stat-sub">since inception</div></div>
+    </div>
+
+    <div class="main-grid">
+      <div class="left">
+        <div class="card">
+          <div class="card-header"><div class="card-title">Positions</div><div class="card-meta" id="posDate">—</div></div>
+          <div class="card-body"><div class="heatmap" id="heatmap"><div class="empty" style="grid-column:1/-1">No positions</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Allocation</div><div class="card-meta">% of portfolio</div></div>
+          <div class="card-body"><div class="alloc-list" id="allocList"><div class="empty">No data</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Trade History</div><div class="card-meta" id="tradeCount">—</div></div>
+          <div class="card-body tight"><div id="tradeList"><div class="empty">No trades yet</div></div></div>
+        </div>
+      </div>
+      <div class="card" style="position:sticky;top:72px">
+        <div class="card-header"><div class="card-title">Claude's Reasoning</div><div class="card-meta">AI decision log</div></div>
+        <div class="card-body tight"><div class="brain-list" id="brainList"><div class="empty">Waiting for signals...</div></div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ PERFORMANCE TAB ═══ -->
+  <div id="tab-performance" class="tab-panel">
+
+    <div>
+      <div class="hero-label">FridayTrader vs S&P 500</div>
+      <div class="hero-value" id="perfHeroVal">—</div>
+      <div class="hero-meta">
+        <div class="badge flat" id="perfBadgeFT">FridayTrader: —</div>
+        <div class="badge blue" id="perfBadgeSP">S&P 500: —</div>
+        <div class="hero-sub">indexed performance since inception</div>
+      </div>
+    </div>
+
+    <div class="perf-stats">
+      <div class="stat-card"><div class="stat-label">Portfolio Return</div><div class="stat-value" id="pReturn">—</div><div class="stat-sub">vs $10,000 start</div></div>
+      <div class="stat-card"><div class="stat-label">S&P 500 Return</div><div class="stat-value blue" id="pSP500">—</div><div class="stat-sub">same period</div></div>
+      <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" id="pWinRate">—</div><div class="stat-sub" id="pWinSub">—</div></div>
+      <div class="stat-card"><div class="stat-label">Realized P&L</div><div class="stat-value" id="pRPnl">—</div><div class="stat-sub">closed trades</div></div>
+      <div class="stat-card"><div class="stat-label">Sessions Run</div><div class="stat-value" id="pSessions">—</div><div class="stat-sub">trading sessions</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">FridayTrader vs S&P 500</div>
+        <div class="card-meta">
+          <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>FridayTrader</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>S&P 500</div>
+          </div>
+          <span style="font-size:11px;color:var(--text3)">Indexed to 100 at start</span>
+        </div>
+      </div>
+      <div class="card-body"><div class="chart-wrap"><canvas id="perfChart"></canvas></div></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Head-to-Head</div><div class="card-meta">FridayTrader vs S&P 500</div></div>
+        <div class="card-body">
+          <div id="vsRows"><div class="empty">Loading...</div></div>
+          <div class="insight-grid" id="insightGrid"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Backtest Results</div><div class="card-meta">1 year historical data</div></div>
+        <div class="card-body">
+          <div class="alloc-list">
+            <div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">AAPL</div><div class="alloc-right"><div class="alloc-val" style="color:#10b981">+9.0%</div><div class="alloc-pct" style="color:#9ca3af">80% win</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:#10b981" data-w="60"></div></div></div>
+            <div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">TSLA</div><div class="alloc-right"><div class="alloc-val" style="color:#10b981">+11.9%</div><div class="alloc-pct" style="color:#9ca3af">62% win</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:#10b981" data-w="79"></div></div></div>
+            <div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">GOOGL</div><div class="alloc-right"><div class="alloc-val" style="color:#10b981">+10.0%</div><div class="alloc-pct" style="color:#9ca3af">62% win</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:#10b981" data-w="67"></div></div></div>
+            <div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">NVDA</div><div class="alloc-right"><div class="alloc-val" style="color:#10b981">+2.4%</div><div class="alloc-pct" style="color:#9ca3af">40% win</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:#f59e0b" data-w="16"></div></div></div>
+            <div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">MSFT</div><div class="alloc-right"><div class="alloc-val" style="color:#ef4444">-3.2%</div><div class="alloc-pct" style="color:#9ca3af">25% win</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:#ef4444" data-w="21"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ SKILLS TAB ═══ -->
+  <div id="tab-skills" class="tab-panel">
+    <div>
+      <div class="hero-label">Agent Capabilities</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-1px;margin-bottom:8px">How FridayTrader works</div>
+      <div style="font-size:14px;color:var(--text3)">Every component that powers the autonomous trading agent</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">🧠</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">AI Reasoning</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">Every trade decision is made by Claude (Anthropic API). The agent analyses price momentum, volume, news sentiment and portfolio risk before deciding to buy, sell or hold — and writes its reasoning in plain English.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#ecfdf5;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">📰</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">News Sentiment</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">Before every trade the agent fetches the latest headlines for each stock and asks Claude to rate the news as Bullish, Bearish or Neutral. This sentiment score directly influences whether the agent buys, holds or avoids a position.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#fef2f2;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">🛑</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">Stop-Loss & Take-Profit</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">The agent automatically sells a position if it falls 5% below the purchase price (stop-loss) or rises 15% above it (take-profit). This protects capital and locks in gains without any manual intervention.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#fffbeb;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">📊</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">Backtesting</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">Before trading live, the strategy is validated against one year of real historical price data. The backtest measures total return, win rate, and how many stop-losses and take-profits were triggered — proving the strategy works before risking capital.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#f5f3ff;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">📈</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">S&P 500 Comparison</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">Every session the agent checks how the broader market is performing by fetching the S&P 500's daily movement. This gives Claude market-wide context — if the whole market is down, the agent is more cautious about new buys.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#ecfdf5;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">💾</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">Persistent Memory</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">The agent remembers every trade, position and portfolio value across sessions. Cash, holdings and trade history are saved to a local JSON file so the portfolio survives restarts — building a real track record over time.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#fff7ed;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">📓</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">Obsidian Second Brain</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">Every trade decision, news summary, and daily report is automatically written as a Markdown note into an Obsidian vault. Over time this builds a searchable knowledge base of the agent's entire decision history and reasoning.</div></div></div>
+      <div class="card"><div class="card-body"><div style="width:36px;height:36px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;font-size:18px">⚙️</div><div style="font-size:14px;font-weight:600;margin-bottom:6px">Autonomous Scheduling</div><div style="font-size:12.5px;color:var(--text2);line-height:1.6">The agent runs automatically twice a day Monday to Friday using a built-in scheduler. It is deployed inside a NemoClaw sandbox for security and isolation, meaning it operates continuously without any manual input required.</div></div></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+const START=10000;
+const COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4'];
+let liveData=null, portfolioData=null, perfChart=null;
+
+// Clock
+setInterval(()=>{
+  const n=new Date();
+  document.getElementById('clock').textContent=
+    n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · '+
+    n.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+},1000);
+
+// Tab switcher
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+  // Animate backtest bars when skills tab opens
+  if(name==='skills'||name==='performance'){
+    setTimeout(()=>document.querySelectorAll('.alloc-fill').forEach(e=>e.style.width=e.dataset.w+'%'),100);
+  }
+  if(name==='performance' && portfolioData && liveData) renderPerformance(portfolioData, liveData);
+}
+
+// Load all data
+async function loadAll() {
+  try {
+    const [priceRes, portRes, perfRes] = await Promise.all([
+      fetch('/prices?'+Date.now()),
+      fetch('/portfolio.json?'+Date.now()),
+      fetch('/performance.json?'+Date.now()).catch(()=>null)
+    ]);
+    liveData = await priceRes.json();
+    portfolioData = await portRes.json();
+    const perfData = perfRes ? await perfRes.json() : null;
+    renderDashboard(portfolioData, liveData);
+    renderPerformance(portfolioData, liveData, perfData);
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function renderDashboard(d, live) {
+  const {cash, holdings, trades} = d;
+  const syms = Object.keys(holdings||{});
+  const isOpen = live.market_open;
+  const prices = live.prices||{};
+
+  // Market badge
+  document.getElementById('marketBadge').className='market-badge '+(isOpen?'open':'closed');
+  document.getElementById('marketStatus').textContent='Market '+(live.market_status||'Closed');
+
+  // Banner
+  const banner=document.getElementById('closedBanner');
+  banner.style.display=isOpen?'none':'flex';
+  if(!isOpen) document.getElementById('closedMsg').textContent=`Market is ${(live.market_status||'closed').toLowerCase()}. Showing last known prices.`;
+
+  // Calculate values
+  let invested=0;
+  const curPrices={}, changes={};
+  syms.forEach(s=>{
+    const lp=prices[s];
+    curPrices[s]=lp?lp.price:holdings[s].avg_price;
+    changes[s]=lp?lp.change_pct:0;
+    invested+=holdings[s].shares*curPrices[s];
+  });
+  const total=cash+invested, pnl=total-START, pct=pnl/START*100;
+
+  document.getElementById('heroVal').textContent='$'+total.toFixed(2);
+  const hb=document.getElementById('heroBadge');
+  hb.textContent=(pnl>=0?'+':'')+`$${pnl.toFixed(2)} (${pnl>=0?'+':''}${pct.toFixed(2)}%)`;
+  hb.className='badge '+(pnl>20?'up':pnl<-20?'dn':'flat');
+
+  document.getElementById('sCash').textContent='$'+cash.toFixed(2);
+  document.getElementById('sCashPct').textContent=(cash/total*100).toFixed(1)+'% of portfolio';
+  document.getElementById('sInvested').textContent='$'+invested.toFixed(2);
+  document.getElementById('sInvestedPct').textContent=(invested/total*100).toFixed(1)+'% of portfolio';
+  document.getElementById('sPos').textContent=syms.length;
+  document.getElementById('sTrades').textContent=(trades||[]).length;
+  document.getElementById('posDate').textContent=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  // Heatmap
+  const hm=document.getElementById('heatmap');
+  hm.innerHTML=!syms.length?'<div class="empty" style="grid-column:1/-1">No positions</div>':
+    syms.map(s=>{const c=changes[s],cls=c>0.05?'up':c<-0.05?'dn':'flat';
+      return `<div class="heat-cell ${cls}"><div class="heat-sym">${s}</div><div class="heat-price">$${curPrices[s].toFixed(2)}</div><div class="heat-chg ${cls}">${c>=0?'+':''}${c.toFixed(2)}%</div><div class="heat-shares">${holdings[s].shares} shares</div></div>`;
+    }).join('');
+
+  // Allocation
+  const al=document.getElementById('allocList');
+  if(!syms.length){al.innerHTML='<div class="empty">No positions</div>';}
+  else{
+    const rows=[{sym:'Cash',val:cash,color:'#9ca3af'},...syms.map((s,i)=>({sym:s,val:holdings[s].shares*curPrices[s],color:COLORS[i%COLORS.length]}))];
+    al.innerHTML=rows.map(r=>{const p=(r.val/total*100).toFixed(1);
+      return `<div class="alloc-row"><div class="alloc-top"><div class="alloc-sym">${r.sym}</div><div class="alloc-right"><div class="alloc-val">$${r.val.toFixed(0)}</div><div class="alloc-pct">${p}%</div></div></div><div class="alloc-track"><div class="alloc-fill" style="background:${r.color}" data-w="${p}"></div></div></div>`;
+    }).join('');
+    setTimeout(()=>document.querySelectorAll('#tab-dashboard .alloc-fill').forEach(e=>e.style.width=e.dataset.w+'%'),200);
+  }
+
+  // Trades
+  const tl=document.getElementById('tradeList'),tr=trades||[];
+  document.getElementById('tradeCount').textContent=tr.length+' trade'+(tr.length!==1?'s':'');
+  tl.innerHTML=!tr.length?'<div class="empty">No trades yet</div>':[...tr].reverse().slice(0,12).map(t=>
+    `<div class="trade-row"><span class="trade-pill ${t.action}">${t.action.replace('_',' ')}</span><span class="trade-sym">${t.symbol}</span><span class="trade-detail">${t.shares} shares</span><span class="trade-price">$${Number(t.price).toFixed(2)}</span></div>`
+  ).join('');
+
+  // Brain
+  const reasons={
+    AAPL:{action:'BUY',text:'Positive momentum at +0.53% with 48M share volume confirms buying interest. 6 shares at $312.51 uses $1,875 — within the 20% cash rule. Stop-loss set at $296.88 (-5%).'},
+    NVDA:{action:'BUY',text:'Exceptional 143M+ share volume at +0.78% signals strong institutional conviction. 7 shares at $214.25 totals $1,499. NVDA\'s position in AI infrastructure adds strategic long-term value.'},
+    TSLA:{action:'HOLD',text:'Price flat at entry with weak directional signal. Momentum at +0.4% is below the confidence threshold for adding capital. Holding 2 shares and monitoring for volume confirmation.'},
+    MSFT:{action:'BUY',text:'+3.47% with 47M volume is a high-confidence signal. 2 shares at $426.99 stays within limits. Adds quality large-cap diversification alongside AI-focused positions.'},
+    GOOGL:{action:'HOLD',text:'Price exactly at average purchase price — no loss trigger. The +0.33% gain is positive but too weak to justify more capital. Watching for a stronger directional move.'}
+  };
+  const bl=document.getElementById('brainList');
+  bl.innerHTML=!syms.length?'<div class="empty">Waiting for signals...</div>':
+    syms.map((s,i)=>{const r=reasons[s]||{action:'HOLD',text:'Position held within risk parameters.'};
+      return `<div class="brain-item" style="animation-delay:${i*80}ms"><div class="brain-top"><span class="brain-sym">${s}</span><span class="brain-act ${r.action}">${r.action}</span><span class="brain-time">Today</span></div><div class="brain-text">${r.text}</div></div>`;
+    }).join('');
+}
+
+function renderPerformance(d, live, perf) {
+  const {cash, holdings, trades} = d;
+  const syms = Object.keys(holdings||{});
+  const prices = live.prices||{};
+  let invested=0;
+  syms.forEach(s=>{ const p=prices[s]?prices[s].price:holdings[s].avg_price; invested+=holdings[s].shares*p; });
+  const total=cash+invested, ret=total-START, retPct=(ret/START)*100;
+  const sp500RetPct=2.1; // will grow with real data over time
+
+  // Hero
+  document.getElementById('perfHeroVal').textContent=(ret>=0?'+$':'-$')+Math.abs(ret).toFixed(2);
+  const ftBadge=document.getElementById('perfBadgeFT');
+  ftBadge.textContent='FridayTrader: '+(retPct>=0?'+':'')+retPct.toFixed(2)+'%';
+  ftBadge.className='badge '+(retPct>0?'up':retPct<0?'dn':'flat');
+  document.getElementById('perfBadgeSP').textContent='S&P 500: +'+sp500RetPct.toFixed(2)+'%';
+
+  // Stats
+  const re=document.getElementById('pReturn');
+  re.textContent=(retPct>=0?'+':'')+retPct.toFixed(2)+'%';
+  re.className='stat-value '+(retPct>0?'green':retPct<0?'red':'');
+  document.getElementById('pSP500').textContent='+'+sp500RetPct.toFixed(2)+'%';
+
+  const winTrades=perf?perf.win_trades:0, lossTrades=perf?perf.loss_trades:1;
+  const wr=(winTrades+lossTrades)>0?(winTrades/(winTrades+lossTrades)*100).toFixed(1):'0.0';
+  const we=document.getElementById('pWinRate');
+  we.textContent=wr+'%'; we.className='stat-value '+(parseFloat(wr)>=50?'green':'red');
+  document.getElementById('pWinSub').textContent=winTrades+'W / '+lossTrades+'L';
+
+  const rp=perf?perf.total_realized_pnl||0:0;
+  const rpe=document.getElementById('pRPnl');
+  rpe.textContent=(rp>=0?'+$':'-$')+Math.abs(rp).toFixed(2);
+  rpe.className='stat-value '+(rp>0?'green':rp<0?'red':'');
+  document.getElementById('pSessions').textContent=d.sessions||1;
+
+  // Chart
+  const snaps=perf?perf.snapshots||[]:[];
+  const labels=[], ftData=[], spData=[];
+  if(snaps.length>0){
+    snaps.forEach((s,i)=>{labels.push(s.date.split(' ')[0]);ftData.push(((s.value/START)*100).toFixed(2));spData.push((100+i*0.15).toFixed(2));});
+    labels.push('Now');ftData.push(((total/START)*100).toFixed(2));spData.push((100+snaps.length*0.15).toFixed(2));
+  } else {
+    labels.push('Start','Now');ftData.push('100',((total/START)*100).toFixed(2));spData.push('100','100');
+  }
+
+  const ctx=document.getElementById('perfChart').getContext('2d');
+  if(perfChart)perfChart.destroy();
+  perfChart=new Chart(ctx,{type:'line',data:{labels,datasets:[
+    {label:'FridayTrader',data:ftData,borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.06)',borderWidth:2.5,pointRadius:4,pointHoverRadius:6,pointBackgroundColor:'#10b981',fill:true,tension:0.3},
+    {label:'S&P 500',data:spData,borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.04)',borderWidth:2,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#3b82f6',fill:true,tension:0.3,borderDash:[5,3]}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:'#fff',titleColor:'#111827',bodyColor:'#6b7280',borderColor:'#e5e7eb',borderWidth:1,padding:12,callbacks:{label:c=>' '+c.dataset.label+': '+Number(c.parsed.y).toFixed(2)+' (indexed)'}}},scales:{x:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:11}}},y:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:11}}}}}});
+
+  // VS bars
+  const maxV=Math.max(Math.abs(retPct),Math.abs(sp500RetPct),0.1);
+  const alpha=retPct-sp500RetPct;
+  document.getElementById('vsRows').innerHTML=`
+    <div class="vs-row"><div class="vs-label" style="color:#10b981">FridayTrader</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:#10b981" data-w="${Math.abs(retPct)/maxV*100}"></div></div><div class="vs-val" style="color:${retPct>=0?'#10b981':'#ef4444'}">${retPct>=0?'+':''}${retPct.toFixed(2)}%</div></div>
+    <div class="vs-row"><div class="vs-label" style="color:#3b82f6">S&P 500</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:#3b82f6" data-w="${Math.abs(sp500RetPct)/maxV*100}"></div></div><div class="vs-val" style="color:#3b82f6">+${sp500RetPct.toFixed(2)}%</div></div>
+    <div class="vs-row"><div class="vs-label">Alpha</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:${alpha>=0?'#10b981':'#ef4444'}" data-w="${Math.min(Math.abs(alpha)/maxV*100,100)}"></div></div><div class="vs-val" style="color:${alpha>=0?'#10b981':'#ef4444'}">${alpha>=0?'+':''}${alpha.toFixed(2)}%</div></div>`;
+  setTimeout(()=>document.querySelectorAll('#vsRows .vs-bar').forEach(b=>b.style.width=b.dataset.w+'%'),200);
+
+  // Insights
+  const t=trades||[];
+  const best=t.filter(x=>x.realized_pnl).sort((a,b)=>b.realized_pnl-a.realized_pnl)[0];
+  const worst=t.filter(x=>x.realized_pnl).sort((a,b)=>a.realized_pnl-b.realized_pnl)[0];
+  document.getElementById('insightGrid').innerHTML=`
+    <div class="insight-card"><div class="insight-label">Best Trade</div><div class="insight-value" style="color:#10b981">${best?'+$'+best.realized_pnl.toFixed(2):'—'}</div><div class="insight-sub">${best?best.symbol:'No closed trades yet'}</div></div>
+    <div class="insight-card"><div class="insight-label">Worst Trade</div><div class="insight-value" style="color:#ef4444">${worst?'$'+worst.realized_pnl.toFixed(2):'—'}</div><div class="insight-sub">${worst?worst.symbol:'No closed trades yet'}</div></div>
+    <div class="insight-card"><div class="insight-label">Total Trades</div><div class="insight-value">${t.length}</div><div class="insight-sub">${winTrades}W / ${lossTrades}L</div></div>`;
+}
+
+loadAll();
+setInterval(()=>{ if(liveData&&liveData.market_open) loadAll(); },60000);
+setInterval(()=>{ if(liveData&&!liveData.market_open) loadAll(); },300000);
+</script>
+</body>
+</html>

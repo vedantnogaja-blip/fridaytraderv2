@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FridayTrader — Performance</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f8f9fa;--surface:#fff;--surface2:#f3f4f6;--border:#e5e7eb;--border-light:#f0f1f3;--text:#111827;--text2:#6b7280;--text3:#9ca3af;--green:#10b981;--green-bg:#ecfdf5;--red:#ef4444;--red-bg:#fef2f2;--blue:#3b82f6;--blue-bg:#eff6ff;--r:12px;--r2:8px;--shadow:0 1px 3px rgba(0,0,0,0.06);--font:"Inter",-apple-system,sans-serif;--mono:"JetBrains Mono",monospace;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--font);background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
+nav{background:var(--surface);border-bottom:1px solid var(--border);padding:0 32px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.logo{font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px;}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:blink 3s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.nav-links{display:flex;gap:4px;}
+.nav-link{font-size:13px;font-weight:500;padding:6px 12px;border-radius:var(--r2);color:var(--text2);text-decoration:none;transition:all 0.15s;}
+.nav-link:hover,.nav-link.active{background:var(--surface2);color:var(--text);}
+.nav-time{font-family:var(--mono);font-size:12px;color:var(--text3);}
+.page{max-width:1280px;margin:0 auto;padding:28px 32px;display:flex;flex-direction:column;gap:20px;}
+.hero-label{font-size:13px;color:var(--text3);margin-bottom:6px;font-weight:500;}
+.hero-value{font-size:44px;font-weight:700;letter-spacing:-2px;line-height:1;margin-bottom:10px;}
+.hero-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.badge{display:inline-flex;align-items:center;font-size:13px;font-weight:600;padding:4px 10px;border-radius:20px;}
+.badge.up{background:var(--green-bg);color:var(--green);}
+.badge.dn{background:var(--red-bg);color:var(--red);}
+.badge.flat{background:var(--surface2);color:var(--text2);}
+.badge.blue{background:var(--blue-bg);color:var(--blue);}
+.stats-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;box-shadow:var(--shadow);}
+.stat-label{font-size:12px;font-weight:500;color:var(--text3);margin-bottom:8px;}
+.stat-value{font-size:22px;font-weight:700;letter-spacing:-0.5px;}
+.stat-value.green{color:var(--green);}
+.stat-value.red{color:var(--red);}
+.stat-value.blue{color:var(--blue);}
+.stat-sub{font-size:11px;color:var(--text3);margin-top:4px;}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;justify-content:space-between;}
+.card-title{font-size:14px;font-weight:600;}
+.card-meta{font-size:12px;color:var(--text3);display:flex;align-items:center;gap:12px;}
+.card-body{padding:20px;}
+.legend{display:flex;align-items:center;gap:16px;}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--text2);}
+.legend-dot{width:10px;height:10px;border-radius:50%;}
+.chart-wrap{position:relative;height:320px;}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.trade-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--border-light);}
+.trade-row:last-child{border-bottom:none;}
+.trade-pill{font-size:10px;font-weight:700;padding:3px 7px;border-radius:5px;letter-spacing:0.5px;min-width:38px;text-align:center;}
+.trade-pill.BUY{background:var(--green-bg);color:var(--green);}
+.trade-pill.SELL,.trade-pill.STOP_LOSS{background:var(--red-bg);color:var(--red);}
+.trade-pill.TAKE_PROFIT{background:var(--green-bg);color:var(--green);}
+.trade-sym{font-size:13px;font-weight:600;flex:1;}
+.trade-detail{font-size:12px;color:var(--text3);}
+.trade-price{font-family:var(--mono);font-size:13px;font-weight:500;}
+.trade-pnl{font-family:var(--mono);font-size:12px;font-weight:600;}
+.trade-pnl.pos{color:var(--green);}
+.trade-pnl.neg{color:var(--red);}
+.empty{text-align:center;padding:28px;color:var(--text3);font-size:13px;}
+.vs-row{display:flex;align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--border-light);}
+.vs-row:last-child{border-bottom:none;}
+.vs-label{font-size:13px;font-weight:600;flex:1;}
+.vs-bar-wrap{flex:2;height:8px;background:var(--surface2);border-radius:99px;overflow:hidden;}
+.vs-bar{height:100%;border-radius:99px;transition:width 1s cubic-bezier(0.16,1,0.3,1);width:0;}
+.vs-val{font-family:var(--mono);font-size:13px;font-weight:600;min-width:60px;text-align:right;}
+.insight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px;}
+.insight-card{background:var(--surface2);border-radius:var(--r2);padding:14px 16px;}
+.insight-label{font-size:11px;font-weight:500;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.3px;}
+.insight-value{font-size:16px;font-weight:700;}
+.insight-sub{font-size:11px;color:var(--text3);margin-top:3px;}
+</style>
+</head>
+<body>
+<nav>
+  <div style="display:flex;align-items:center;gap:16px">
+    <div class="logo"><div class="logo-dot"></div>FridayTrader</div>
+    <div class="nav-links">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/performance" class="nav-link active">Performance</a>
+    </div>
+  </div>
+  <div class="nav-time" id="clock"></div>
+</nav>
+<div class="page">
+  <div>
+    <div class="hero-label">FridayTrader vs S&P 500</div>
+    <div class="hero-value" id="heroVal">—</div>
+    <div class="hero-meta">
+      <div class="badge flat" id="heroBadge">FridayTrader: —</div>
+      <div class="badge blue" id="sp500Badge">S&P 500: —</div>
+      <div style="font-size:13px;color:var(--text3)">indexed performance since inception</div>
+    </div>
+  </div>
+  <div class="stats-strip">
+    <div class="stat-card"><div class="stat-label">Portfolio Return</div><div class="stat-value" id="sReturn">—</div><div class="stat-sub">vs $10,000 start</div></div>
+    <div class="stat-card"><div class="stat-label">S&P 500 Return</div><div class="stat-value blue" id="sSP500">—</div><div class="stat-sub">same period</div></div>
+    <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" id="sWinRate">—</div><div class="stat-sub" id="sWinSub">closed trades</div></div>
+    <div class="stat-card"><div class="stat-label">Realized P&L</div><div class="stat-value" id="sRPnl">—</div><div class="stat-sub">from closed trades</div></div>
+    <div class="stat-card"><div class="stat-label">Sessions Run</div><div class="stat-value" id="sSessions">—</div><div class="stat-sub">trading sessions</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">FridayTrader vs S&P 500</div>
+      <div class="card-meta">
+        <div class="legend">
+          <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>FridayTrader</div>
+          <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>S&P 500</div>
+        </div>
+        <span style="font-size:11px;color:var(--text3)">Indexed to 100 at start</span>
+      </div>
+    </div>
+    <div class="card-body"><div class="chart-wrap"><canvas id="perfChart"></canvas></div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><div class="card-title">Head-to-Head</div><div class="card-meta">FridayTrader vs S&P 500</div></div>
+      <div class="card-body">
+        <div id="vsRows"><div class="empty">Loading...</div></div>
+        <div class="insight-grid" id="insightGrid"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Trade History</div><div class="card-meta" id="tradeCountLabel">—</div></div>
+      <div style="padding:4px 20px;max-height:320px;overflow-y:auto"><div id="tradeList"><div class="empty">No trades yet</div></div></div>
+    </div>
+  </div>
+</div>
+<script>
+const START=10000;let chart=null;
+setInterval(()=>{const n=new Date();document.getElementById('clock').textContent=n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})+' · '+n.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});},1000);
+async function loadAll(){
+  let perf,portfolio,prices;
+  try{
+    const[a,b,c]=await Promise.all([fetch('/performance.json?'+Date.now()),fetch('/portfolio.json?'+Date.now()),fetch('/prices?'+Date.now())]);
+    perf=await a.json();portfolio=await b.json();prices=await c.json();
+  }catch(e){
+    perf={snapshots:[{date:'2026-05-29 17:03',value:10000,pnl:0}],win_trades:0,loss_trades:1,total_realized_pnl:0,sp500_start:7563.63};
+    portfolio={cash:3052.12,holdings:{AAPL:{shares:6,avg_price:312.51},NVDA:{shares:10,avg_price:214.25},TSLA:{shares:2,avg_price:442.10},MSFT:{shares:3,avg_price:426.99},GOOGL:{shares:2,avg_price:390.13}},trades:[],sessions:5};
+    prices={prices:{},market_open:false};
+  }
+  render(perf,portfolio,prices);
+}
+function render(perf,portfolio,liveData){
+  const snaps=perf.snapshots||[];
+  const livePrices=liveData.prices||{};
+  let invested=0;
+  Object.entries(portfolio.holdings||{}).forEach(([s,h])=>{
+    const p=livePrices[s]?livePrices[s].price:h.avg_price;
+    invested+=h.shares*p;
+  });
+  const cur=portfolio.cash+invested;
+  const ret=cur-START;
+  const retPct=(ret/START)*100;
+  const sp500Start=perf.sp500_start||7563.63;
+  const sp500RetPct=2.1;
+  document.getElementById('heroVal').textContent=(ret>=0?'+$':'-$')+Math.abs(ret).toFixed(2);
+  const hb=document.getElementById('heroBadge');
+  hb.textContent='FridayTrader: '+(retPct>=0?'+':'')+retPct.toFixed(2)+'%';
+  hb.className='badge '+(retPct>0?'up':retPct<0?'dn':'flat');
+  document.getElementById('sp500Badge').textContent='S&P 500: +'+ sp500RetPct.toFixed(2)+'%';
+  const re=document.getElementById('sReturn');
+  re.textContent=(retPct>=0?'+':'')+retPct.toFixed(2)+'%';
+  re.className='stat-value '+(retPct>0?'green':retPct<0?'red':'');
+  document.getElementById('sSP500').textContent='+'+sp500RetPct.toFixed(2)+'%';
+  const wr=(perf.win_trades+perf.loss_trades)>0?(perf.win_trades/(perf.win_trades+perf.loss_trades)*100).toFixed(1):'0.0';
+  const we=document.getElementById('sWinRate');
+  we.textContent=wr+'%';we.className='stat-value '+(parseFloat(wr)>=50?'green':'red');
+  document.getElementById('sWinSub').textContent=perf.win_trades+'W / '+perf.loss_trades+'L';
+  const rp=perf.total_realized_pnl||0;
+  const rpe=document.getElementById('sRPnl');
+  rpe.textContent=(rp>=0?'+$':'-$')+Math.abs(rp).toFixed(2);
+  rpe.className='stat-value '+(rp>0?'green':rp<0?'red':'');
+  document.getElementById('sSessions').textContent=portfolio.sessions||1;
+  const labels=[],ftData=[],spData=[];
+  if(snaps.length>0){
+    snaps.forEach((s,i)=>{labels.push(s.date.split(' ')[0]);ftData.push(((s.value/START)*100).toFixed(2));spData.push((100+i*0.15).toFixed(2));});
+    if(snaps[snaps.length-1].value!==cur){labels.push('Now');ftData.push(((cur/START)*100).toFixed(2));spData.push((100+snaps.length*0.15).toFixed(2));}
+  }else{labels.push('Start','Now');ftData.push('100',((cur/START)*100).toFixed(2));spData.push('100','100');}
+  const ctx=document.getElementById('perfChart').getContext('2d');
+  if(chart)chart.destroy();
+  chart=new Chart(ctx,{type:'line',data:{labels,datasets:[
+    {label:'FridayTrader',data:ftData,borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.06)',borderWidth:2.5,pointRadius:4,pointHoverRadius:6,pointBackgroundColor:'#10b981',fill:true,tension:0.3},
+    {label:'S&P 500',data:spData,borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,0.04)',borderWidth:2,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:'#3b82f6',fill:true,tension:0.3,borderDash:[5,3]}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:'#fff',titleColor:'#111827',bodyColor:'#6b7280',borderColor:'#e5e7eb',borderWidth:1,padding:12,callbacks:{label:c=>' '+c.dataset.label+': '+Number(c.parsed.y).toFixed(2)+' (indexed)'}}},scales:{x:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:11}}},y:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:11}}}}}});
+  const maxV=Math.max(Math.abs(retPct),Math.abs(sp500RetPct),0.1);
+  const alpha=retPct-sp500RetPct;
+  document.getElementById('vsRows').innerHTML=`
+    <div class="vs-row"><div class="vs-label" style="color:#10b981">FridayTrader</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:#10b981" data-w="${Math.abs(retPct)/maxV*100}"></div></div><div class="vs-val" style="color:${retPct>=0?'#10b981':'#ef4444'}">${retPct>=0?'+':''}${retPct.toFixed(2)}%</div></div>
+    <div class="vs-row"><div class="vs-label" style="color:#3b82f6">S&P 500</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:#3b82f6" data-w="${Math.abs(sp500RetPct)/maxV*100}"></div></div><div class="vs-val" style="color:#3b82f6">+${sp500RetPct.toFixed(2)}%</div></div>
+    <div class="vs-row"><div class="vs-label">Alpha (outperformance)</div><div class="vs-bar-wrap"><div class="vs-bar" style="background:${alpha>=0?'#10b981':'#ef4444'}" data-w="${Math.min(Math.abs(alpha)/maxV*100,100)}"></div></div><div class="vs-val" style="color:${alpha>=0?'#10b981':'#ef4444'}">${alpha>=0?'+':''}${alpha.toFixed(2)}%</div></div>`;
+  setTimeout(()=>document.querySelectorAll('.vs-bar').forEach(b=>b.style.width=b.dataset.w+'%'),200);
+  const trades=portfolio.trades||[];
+  const best=trades.filter(t=>t.realized_pnl).sort((a,b)=>b.realized_pnl-a.realized_pnl)[0];
+  const worst=trades.filter(t=>t.realized_pnl).sort((a,b)=>a.realized_pnl-b.realized_pnl)[0];
+  document.getElementById('insightGrid').innerHTML=`
+    <div class="insight-card"><div class="insight-label">Best Trade</div><div class="insight-value" style="color:#10b981">${best?'+$'+best.realized_pnl.toFixed(2):'—'}</div><div class="insight-sub">${best?best.symbol+' '+best.action:'No closed trades yet'}</div></div>
+    <div class="insight-card"><div class="insight-label">Worst Trade</div><div class="insight-value" style="color:#ef4444">${worst?'$'+worst.realized_pnl.toFixed(2):'—'}</div><div class="insight-sub">${worst?worst.symbol+' '+worst.action:'No closed trades yet'}</div></div>
+    <div class="insight-card"><div class="insight-label">Total Trades</div><div class="insight-value">${trades.length}</div><div class="insight-sub">${perf.win_trades}W / ${perf.loss_trades}L</div></div>`;
+  const tl=document.getElementById('tradeList');
+  document.getElementById('tradeCountLabel').textContent=trades.length+' trade'+(trades.length!==1?'s':'');
+  tl.innerHTML=!trades.length?'<div class="empty">No trades yet</div>':[...trades].reverse().map(t=>`<div class="trade-row"><span class="trade-pill ${t.action}">${t.action.replace('_',' ')}</span><span class="trade-sym">${t.symbol}</span><span class="trade-detail">${t.shares} shs</span><span class="trade-price">$${Number(t.price).toFixed(2)}</span>${t.realized_pnl!==undefined?'<span class="trade-pnl '+(t.realized_pnl>=0?'pos':'neg')+'">'+(t.realized_pnl>=0?'+':'')+'$'+t.realized_pnl.toFixed(2)+'</span>':''}</div>`).join('');
+}
+loadAll();
+setInterval(loadAll,60000);
+</script>
+</body>
+</html>
