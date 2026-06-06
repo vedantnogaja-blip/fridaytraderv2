@@ -8,9 +8,13 @@ import time
 from datetime import datetime
 import pytz
 import numpy as np
+import pandas as pd
+
+from config import ADVANCED_LAYER_WEIGHTS, ADVANCED_CAP
+from advanced_strategies import find_cointegrated_pairs, train_ml_model, combine_signals
 
 STARTING_CASH = 10000.00
-WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL"]
+WATCHLIST = ["AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "NNE", "LEU", "RDW", "DCO", "CEG", "CCJ", "COST", "TJX", "CAVA", "CMG", "VRT", "CRDO"]
 VAULT = os.path.expanduser("~/Documents/FridayTrader")
 PORTFOLIO_FILE = os.path.join(VAULT, "portfolio.json")
 PERFORMANCE_FILE = os.path.join(VAULT, "performance.json")
@@ -21,6 +25,50 @@ RSI_OVERSOLD = 35
 RSI_OVERBOUGHT = 70
 
 client = anthropic.Anthropic()
+
+# ── Advanced signal cache (rebuilt at most once per calendar day) ─────────────
+_PRICE_CACHE = {"df": None, "date": None}
+_ADV_CACHE   = {"model": None, "pairs": None, "date": None}
+
+def get_price_frame():
+    today = datetime.now().strftime("%Y-%m-%d")
+    if _PRICE_CACHE["df"] is not None and _PRICE_CACHE["date"] == today:
+        return _PRICE_CACHE["df"]
+    print("  [adv] Downloading 2y price history (cached daily)...")
+    raw = yf.download(WATCHLIST, period="2y", auto_adjust=True, progress=False)
+    df = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+    df = df.dropna(how="all")
+    _PRICE_CACHE["df"] = df
+    _PRICE_CACHE["date"] = today
+    return df
+
+def get_advanced_cache(frame):
+    today = datetime.now().strftime("%Y-%m-%d")
+    if _ADV_CACHE["date"] == today and _ADV_CACHE["model"] is not None:
+        return _ADV_CACHE["model"], _ADV_CACHE["pairs"]
+    print("  [adv] Training ML model + finding pairs (once per day)...")
+    model, _ = train_ml_model(frame, verbose=True)
+    pairs = find_cointegrated_pairs(frame)
+    _ADV_CACHE["model"] = model
+    _ADV_CACHE["pairs"] = pairs
+    _ADV_CACHE["date"] = today
+    return model, pairs
+
+def _fmt_adv_detail(symbol, adv_detail):
+    """Format per-symbol advanced signal breakdown for Obsidian logging."""
+    if not adv_detail:
+        return "none"
+    reg = adv_detail.get("regime", {}).get(symbol, {})
+    ml  = adv_detail.get("ml", {}).get(symbol, {})
+    pair_str = next(
+        (f"{k}(z={v['z']:+.1f})" for k, v in adv_detail.get("pairs", {}).items() if symbol in k),
+        "none"
+    )
+    reg_str = (f"{reg.get('regime','?')}({reg.get('score', 0):+d} {reg.get('strategy','?')})"
+               if reg else "none")
+    ml_str  = (f"prob_up={ml.get('prob_up', 0):.2f}({ml.get('score', 0):+d})"
+               if ml else "none")
+    return f"regime={reg_str} | ml={ml_str} | pairs={pair_str}"
 
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
@@ -174,7 +222,7 @@ def ask_claude(data, portfolio, headlines, signals, score, sp500):
 PRICE: ${data["price"]} ({data["change_pct"]:+.2f}% today) | 5d trend: {data["trend_5d"]:+.2f}%
 RSI: {data["rsi"]} | MACD histogram: {data["macd_histogram"]} | Volume: {data["volume_ratio"]}x avg
 Price position: {data["price_position"]}% of 20d range (0=low, 100=high)
-Tech score: {score} — {bias}
+Score: {score} (blended) — {bias}
 
 Signals:
 {sigs}
@@ -241,11 +289,12 @@ def execute_trade(portfolio, decision, shares, symbol, price, reasoning):
         save_performance(perf)
         print(f"  ✅ SELL {h['shares']} shares of {symbol} @ ${price} | P&L: ${pnl:+.2f}")
 
-def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data, signals, score):
+def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data, signals, score, adv_detail=None):
     trades_dir = os.path.join(VAULT, "Trades")
     os.makedirs(trades_dir, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     bias = "BULLISH" if score >= 3 else "BEARISH" if score <= -3 else "NEUTRAL"
+    adv_line = _fmt_adv_detail(symbol, adv_detail)
     content = f"""# {symbol} — {decision} — {date_str}
 **Action:** {decision} {shares} shares @ ${price} | **Confidence:** {confidence}
 
@@ -257,7 +306,8 @@ def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data
 | Volume Ratio | {data["volume_ratio"]}x | {"High" if data["volume_ratio"]>1.2 else "Low" if data["volume_ratio"]<0.8 else "Normal"} |
 | Price Position | {data["price_position"]}% | {"Near Low" if data["price_position"]<30 else "Near High" if data["price_position"]>80 else "Mid"} |
 
-**Score: {score} — {bias}**
+**Score: {score} (blended) — {bias}**
+**Advanced:** {adv_line}
 **Reasoning:** {reasoning}
 """
     with open(os.path.join(trades_dir, f"{date_str}-{symbol}-v3.md"), "w") as f:
@@ -273,6 +323,18 @@ def run_trading_session():
     print(f"📊 S&P 500: {sp500_change:+.2f}% | Cash: ${portfolio['cash']:,.2f}")
     print(f"Holdings: {list(portfolio['holdings'].keys())}")
     print(f"{'='*55}\n")
+    # ── Build advanced signals once for this session ──────────────────────────
+    adv_combined, adv_detail = {}, {}
+    try:
+        frame = get_price_frame()
+        adv_model, adv_pairs = get_advanced_cache(frame)
+        adv_combined, adv_detail = combine_signals(
+            frame, weights=ADVANCED_LAYER_WEIGHTS, ml_model=adv_model, pairs=adv_pairs)
+        print(f"  [adv] Advanced signals ready for {len(adv_combined)} symbols\n")
+    except Exception as e:
+        print(f"  [adv] Advanced layer error (proceeding without): {e}\n")
+    # ──────────────────────────────────────────────────────────────────────────
+
     current_prices = {}
     for symbol in WATCHLIST:
         print(f"\n📊 Analyzing {symbol}...")
@@ -286,12 +348,20 @@ def run_trading_session():
             print(f"  🚨 Auto-{auto_dec}: {auto_reason}")
             execute_trade(portfolio, auto_dec, 0, symbol, data["price"], auto_reason)
             signals, score = evaluate_signals(data)
-            log_to_obsidian(symbol, auto_dec, 0, data["price"], "HIGH", auto_reason, data, signals, score)
+            log_to_obsidian(symbol, auto_dec, 0, data["price"], "HIGH", auto_reason, data, signals, score, adv_detail)
             continue
         signals, score = evaluate_signals(data)
+
+        # Blend advanced score — cap contribution so it nudges, never dominates
+        adv_raw    = adv_combined.get(symbol, 0)
+        adv_contrib = max(-ADVANCED_CAP, min(ADVANCED_CAP, adv_raw))
+        blended_score = score + adv_contrib
+        adv_line = _fmt_adv_detail(symbol, adv_detail)
+        print(f"  [adv] {symbol}: tech={score:+d}, adv={adv_contrib:+d} → blended={blended_score:+d} | {adv_line}")
+
         headlines = get_headlines(symbol)
-        print(f"  🧠 Asking Claude (tech score: {score})...")
-        response = ask_claude(data, portfolio, headlines, signals, score, sp500_change)
+        print(f"  🧠 Asking Claude (blended score: {blended_score})...")
+        response = ask_claude(data, portfolio, headlines, signals, blended_score, sp500_change)
         decision, shares, confidence, reasoning = parse_decision(response)
         print(f"  Decision: {decision} {shares} shares ({confidence})")
         print(f"  {reasoning[:80]}")
@@ -299,7 +369,7 @@ def run_trading_session():
             execute_trade(portfolio, decision, shares, symbol, data["price"], reasoning)
         else:
             print(f"  ⏸️  HOLD")
-        log_to_obsidian(symbol, decision, shares, data["price"], confidence, reasoning, data, signals, score)
+        log_to_obsidian(symbol, decision, shares, data["price"], confidence, reasoning, data, signals, blended_score, adv_detail)
     total = portfolio["cash"] + sum(h["shares"]*current_prices.get(s, h["avg_price"]) for s,h in portfolio["holdings"].items())
     pnl = total - STARTING_CASH
     perf = load_performance()
