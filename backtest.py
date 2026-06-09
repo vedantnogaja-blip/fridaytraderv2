@@ -23,7 +23,11 @@ import statsmodels.api as sm
 
 from config import (WATCHLIST, ADVANCED_LAYER_WEIGHTS, ADVANCED_CAP,
                     ATR_STOP_MULT, ATR_TARGET_MULT,
-                    DRAWDOWN_CIRCUIT_BREAKER, DRAWDOWN_RESUME_PCT)
+                    DRAWDOWN_CIRCUIT_BREAKER, DRAWDOWN_RESUME_PCT,
+                    SPY_REGIME_WINDOW, WEEKLY_RSI_PERIOD, WEEKLY_RSI_MAX,
+                    RSI_OVERSOLD, RSI_DEEP_OVERSOLD, RSI_OVERBOUGHT,
+                    VOLUME_SURGE_MIN, RS3M_BULL_THRESH, RS3M_BEAR_THRESH,
+                    MIN_BUY_SCORE, MAX_SELL_SCORE)
 from advanced_strategies import (
     rsi as _rsi, macd_hist as _macd_hist,
     find_cointegrated_pairs, train_ml_model,
@@ -36,8 +40,6 @@ STOP_LOSS       = 0.05
 TAKE_PROFIT     = 0.15
 MAX_POS_PCT     = 0.20
 MAX_POSITIONS   = 5
-MIN_BUY_SCORE   = 3
-MAX_SELL_SCORE  = -3
 TRAIN_FRAC      = 0.70
 REGIME_N        = 20
 MOMENTUM_LB     = 63
@@ -120,6 +122,103 @@ def compute_tech_scores(closes, volumes):
         scores.loc[s.index, sym] += s
 
     return scores.clip(-8, 8)
+
+
+# ── New signal stack v2 (RSI gate + 50MA + volume + 3m RS) ───────────────────
+
+def compute_tech_scores_v2(closes, volumes, spy_closes):
+    """Signal rebuild v2: RSI primary gate, 50MA bias, volume surge, 3m RS vs SPY.
+    Returns (scores DataFrame, rsi_gate_mask DataFrame).
+    MACD and 5-day trend dropped — zero OOS predictive power confirmed in diagnostic.
+    """
+    scores   = pd.DataFrame(0.0, index=closes.index, columns=closes.columns)
+    rsi_gate = pd.DataFrame(False, index=closes.index, columns=closes.columns)
+
+    spy_ret3m = spy_closes.pct_change(63) * 100   # SPY 3-month return, daily series
+
+    for sym in closes.columns:
+        px  = closes[sym].dropna()
+        vol = volumes.get(sym, pd.Series(dtype=float)).reindex(px.index).fillna(0)
+
+        # RSI: gate (must be < RSI_OVERSOLD for any buy) + score
+        r = _rsi(px, 14)
+        rsi_gate.loc[r.index, sym] = r < RSI_OVERSOLD
+        s = pd.Series(0.0, index=r.index)
+        s[r < RSI_DEEP_OVERSOLD] = 3.0          # deeply oversold
+        s[(r >= RSI_DEEP_OVERSOLD) & (r < RSI_OVERSOLD)] = 2.0   # oversold
+        s[r > RSI_OVERBOUGHT] = -2.0
+        scores.loc[s.index, sym] += s
+
+        # 50-day MA bias (replaces MACD)
+        ma50 = px.rolling(50).mean()
+        px_aligned = px.reindex(ma50.index)
+        s = pd.Series(0.0, index=ma50.index)
+        s[px_aligned > ma50] = 2.0
+        s[px_aligned <= ma50] = -1.0
+        scores.loc[s.index, sym] += s
+
+        # Volume surge confirmation
+        avg_vol = vol.rolling(20).mean()
+        vr = vol / avg_vol.replace(0, np.nan)
+        s = pd.Series(0.0, index=vr.index)
+        s[vr >= VOLUME_SURGE_MIN] = 2.0
+        s[vr < 0.8] = -1.0
+        scores.loc[s.index, sym] += s
+
+        # 3-month relative strength vs SPY (replaces 5-day trend)
+        ret3m  = px.pct_change(63) * 100
+        spy_r3 = spy_ret3m.reindex(px.index)
+        rs3m   = ret3m - spy_r3
+        s = pd.Series(0.0, index=rs3m.index)
+        s[rs3m >= RS3M_BULL_THRESH]  =  2.0
+        s[rs3m <= RS3M_BEAR_THRESH]  = -1.0
+        scores.loc[s.index, sym] += s
+
+        # Near 20d low/high (kept)
+        hi = px.rolling(20).max(); lo = px.rolling(20).min()
+        pp = (px - lo) / (hi - lo).replace(0, np.nan) * 100
+        s = pd.Series(0.0, index=pp.index)
+        s[pp < 30] = 1.0; s[pp > 80] = -1.0
+        scores.loc[s.index, sym] += s
+
+    return scores.clip(-10, 10), rsi_gate
+
+
+def compute_spy_regime_mask(spy_closes, window=SPY_REGIME_WINDOW):
+    """Boolean Series: True (bull) when SPY > 200MA, False (bear) otherwise."""
+    ma = spy_closes.rolling(window, min_periods=window).mean()
+    return (spy_closes > ma).fillna(True)   # default True before enough history
+
+
+def download_weekly_data(watchlist):
+    """Download 2y of weekly OHLCV for multi-timeframe signals."""
+    print("  Downloading weekly data for MTF filter...")
+    try:
+        raw = yf.download(watchlist, period="2y", interval="1wk",
+                          auto_adjust=True, progress=False)
+        wc = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+        return wc.dropna(how="all")
+    except Exception as e:
+        print(f"  [weekly] Download failed ({e}), MTF disabled")
+        return pd.DataFrame()
+
+
+def compute_weekly_bullish_mask(weekly_closes, daily_index):
+    """Forward-fill weekly (5-period RSI < 60 AND MACD hist > 0) to daily index.
+    Returns DataFrame[bool] aligned to daily_index. Defaults True on missing data.
+    """
+    result = pd.DataFrame(True, index=daily_index, columns=weekly_closes.columns)
+    for sym in weekly_closes.columns:
+        px = weekly_closes[sym].dropna()
+        if len(px) < 15:
+            continue
+        w_rsi  = _rsi(px, WEEKLY_RSI_PERIOD)
+        w_macd = _macd_hist(px)
+        weekly_bull = (w_rsi < WEEKLY_RSI_MAX) & (w_macd > 0)
+        # Forward-fill weekly value to each trading day
+        daily_vals = weekly_bull.reindex(daily_index, method="ffill").fillna(True)
+        result[sym] = daily_vals
+    return result
 
 
 # ── Regime score (vectorized, causal rolling windows) ────────────────────────
@@ -222,7 +321,14 @@ def blend(tech, regime, pairs, ml, weights=None, cap=ADVANCED_CAP):
 # Stop/target: ATR-based (entry_price ± ATR_14 * multiplier from config).
 # Drawdown circuit breaker: halts new BUYs when portfolio falls >8% from peak.
 
-def simulate(dates, closes, opens, scores, atrs):
+def simulate(dates, closes, opens, scores, atrs,
+             rsi_gate=None, spy_regime=None, weekly_bullish=None):
+    """
+    rsi_gate:       DataFrame[bool] — True where RSI < RSI_OVERSOLD (v2 gate)
+    spy_regime:     Series[bool]    — True on days where SPY > 200MA
+    weekly_bullish: DataFrame[bool] — True where weekly MTF agrees with buy
+    All masks default to always-True (no filtering) when None.
+    """
     cash         = float(STARTING_CASH)
     holdings     = {}   # sym -> {shares, avg_price, entry_atr}
     values       = []
@@ -233,6 +339,33 @@ def simulate(dates, closes, opens, scores, atrs):
     closed_trades = []
 
     valid = [d for d in dates if d in closes.index and d in scores.index]
+
+    def _rsi_ok(date, sym):
+        if rsi_gate is None:
+            return True
+        try:
+            v = rsi_gate.loc[date, sym]
+            return bool(v) if not pd.isna(v) else True
+        except (KeyError, TypeError):
+            return True
+
+    def _regime_ok(date):
+        if spy_regime is None:
+            return True
+        try:
+            v = spy_regime.loc[date]
+            return bool(v) if not pd.isna(v) else True
+        except (KeyError, TypeError):
+            return True
+
+    def _weekly_ok(date, sym):
+        if weekly_bullish is None:
+            return True
+        try:
+            v = weekly_bullish.loc[date, sym]
+            return bool(v) if not pd.isna(v) else True
+        except (KeyError, TypeError):
+            return True
 
     def _px(prices, sym):
         p = prices.get(sym)
@@ -328,15 +461,16 @@ def simulate(dates, closes, opens, scores, atrs):
         # ── Step 4: queue new buys for T+1 open ──────────────────────────
         occupied = set(holdings) | {s for s, a in pending.items() if a == 'sell'}
         slots    = MAX_POSITIONS - (len(holdings) - len([s for s in pending if s in holdings]))
-        if slots > 0 and not buy_halted:
+        if slots > 0 and not buy_halted and _regime_ok(date):
             candidates = (
                 day[day >= MIN_BUY_SCORE]
                 .drop(index=list(occupied), errors="ignore")
                 .sort_values(ascending=False)
             )
             for sym in candidates.index[:slots]:
-                pending[sym] = 'buy'
-                pending_atrs[sym] = _atr(date, sym)
+                if _rsi_ok(date, sym) and _weekly_ok(date, sym):
+                    pending[sym] = 'buy'
+                    pending_atrs[sym] = _atr(date, sym)
 
     return pd.Series(values, index=valid, dtype=float), closed_trades
 
@@ -1042,8 +1176,111 @@ if __name__ == "__main__":
     else:
         print("\n  (Monte Carlo skipped — run without --fast to include)")
 
-    # ── Layer ablation ────────────────────────────────────────────────────
+    # ── Old v1 layer ablation ─────────────────────────────────────────────
     walk_forward_layer_analysis(closes, opens, atrs, tech, regime, pair_s, ml_s, test_idx, split_date)
+
+    # ── NEW SIGNAL v2 ABLATION (OOS only, 70/30 split) ───────────────────
+    print(f"\n{'='*w}")
+    print(f"  SIGNAL v2 ABLATION  (OOS: {split_date.date()} → {closes.index[-1].date()})")
+    print(f"  RSI gate required | 50MA replaces MACD | RS3M replaces 5d-trend")
+    print(f"{'='*w}")
+
+    # Pre-compute v2 components over full dataset (causal — safe for OOS-only eval)
+    spy_regime_mask  = compute_spy_regime_mask(spy, SPY_REGIME_WINDOW)
+    weekly_closes    = download_weekly_data(WATCHLIST)
+    weekly_bull_mask = compute_weekly_bullish_mask(weekly_closes, closes.index) if not weekly_closes.empty else None
+
+    tech_v2, rsi_gate_mask = compute_tech_scores_v2(closes, volumes, spy)
+    # Blend with same advanced layers (regime/pairs/ml trained on IS)
+    blended_v2 = blend(tech_v2, regime, pair_s, ml_s, weights=ADVANCED_LAYER_WEIGHTS)
+
+    spy_oos_series = spy.reindex(test_idx).dropna()
+
+    ablation_configs = [
+        # (label, scores, rsi_gate, spy_reg, weekly_bull)
+        ("v1 baseline (MACD+trend)",          blended,    None,          None,             None),
+        ("v2 RSI-gate only",                  blended_v2, rsi_gate_mask, None,             None),
+        ("v2 + SPY regime filter",            blended_v2, rsi_gate_mask, spy_regime_mask,  None),
+        ("v2 + SPY regime + weekly MTF",      blended_v2, rsi_gate_mask, spy_regime_mask,  weekly_bull_mask),
+    ]
+
+    print(f"\n  {'Config':<36}  {'OOS Ret':>8}  {'Sharpe':>7}  {'MaxDD':>7}  {'#Tr':>4}")
+    print(f"  {'─'*36}  {'─'*8}  {'─'*7}  {'─'*7}  {'─'*4}")
+
+    v2_ablation_results = {}
+    for label, sc, rg, sr, wb in ablation_configs:
+        v, tr = simulate(test_idx, closes, opens, sc, atrs,
+                         rsi_gate=rg, spy_regime=sr, weekly_bullish=wb)
+        if len(v) < 5:
+            print(f"  {label:<36}  no data")
+            continue
+        m = full_metrics(v, tr, spy_oos_series, label=label)
+        v2_ablation_results[label] = m
+        marker = "✓" if m.get("sharpe", 0) > 0.3 else ("✗" if m.get("sharpe", 0) < -0.3 else "~")
+        print(f"  {marker} {label:<35}  {m.get('total_return',0)*100:>+7.1f}%  "
+              f"{m.get('sharpe',0):>7.2f}  {m.get('max_drawdown',0)*100:>6.1f}%  "
+              f"{m.get('n_trades',0):>4}")
+
+    # ── Individual new-signal contribution ───────────────────────────────
+    print(f"\n  INDIVIDUAL NEW SIGNAL CONTRIBUTION (RSI-gate on, no advanced layer)")
+    print(f"  {'─'*36}  {'─'*8}  {'─'*7}  {'─'*7}  {'─'*4}")
+
+    def _signal_only(closes, volumes, spy_c, include_ma50, include_vol, include_rs3m):
+        """Build scores using only the requested new signals + RSI gate."""
+        scores   = pd.DataFrame(0.0, index=closes.index, columns=closes.columns)
+        rsi_gate = pd.DataFrame(False, index=closes.index, columns=closes.columns)
+        spy_ret3m = spy_c.pct_change(63) * 100
+        for sym in closes.columns:
+            px  = closes[sym].dropna()
+            vol = volumes.get(sym, pd.Series(dtype=float)).reindex(px.index).fillna(0)
+            r = _rsi(px, 14)
+            rsi_gate.loc[r.index, sym] = r < RSI_OVERSOLD
+            s = pd.Series(0.0, index=r.index)
+            s[r < RSI_DEEP_OVERSOLD] = 3.0
+            s[(r >= RSI_DEEP_OVERSOLD) & (r < RSI_OVERSOLD)] = 2.0
+            s[r > RSI_OVERBOUGHT] = -2.0
+            scores.loc[s.index, sym] += s
+            if include_ma50:
+                ma50 = px.rolling(50).mean()
+                px_a = px.reindex(ma50.index)
+                s2 = pd.Series(0.0, index=ma50.index)
+                s2[px_a > ma50] = 2.0; s2[px_a <= ma50] = -1.0
+                scores.loc[s2.index, sym] += s2
+            if include_vol:
+                avg_v = vol.rolling(20).mean()
+                vr = vol / avg_v.replace(0, np.nan)
+                s2 = pd.Series(0.0, index=vr.index)
+                s2[vr >= VOLUME_SURGE_MIN] = 2.0; s2[vr < 0.8] = -1.0
+                scores.loc[s2.index, sym] += s2
+            if include_rs3m:
+                ret3m = px.pct_change(63) * 100
+                rs3m  = ret3m - spy_ret3m.reindex(px.index)
+                s2 = pd.Series(0.0, index=rs3m.index)
+                s2[rs3m >= RS3M_BULL_THRESH] = 2.0; s2[rs3m <= RS3M_BEAR_THRESH] = -1.0
+                scores.loc[s2.index, sym] += s2
+        return scores.clip(-10, 10), rsi_gate
+
+    signal_configs = [
+        ("RSI gate only",                False, False, False),
+        ("RSI gate + 50MA",              True,  False, False),
+        ("RSI gate + volume surge",      False, True,  False),
+        ("RSI gate + 3m RS vs SPY",      False, False, True),
+        ("RSI gate + 50MA + vol + RS3M", True,  True,  True),
+    ]
+    for label, ma, vol_f, rs in signal_configs:
+        sc, rg = _signal_only(closes, volumes, spy, ma, vol_f, rs)
+        v, tr  = simulate(test_idx, closes, opens, sc, atrs, rsi_gate=rg)
+        if len(v) < 5:
+            print(f"  {label:<36}  no data")
+            continue
+        m = full_metrics(v, tr, spy_oos_series, label=label)
+        marker = "✓" if m.get("sharpe", 0) > 0.3 else ("✗" if m.get("sharpe", 0) < -0.3 else "~")
+        print(f"  {marker} {label:<35}  {m.get('total_return',0)*100:>+7.1f}%  "
+              f"{m.get('sharpe',0):>7.2f}  {m.get('max_drawdown',0)*100:>6.1f}%  "
+              f"{m.get('n_trades',0):>4}")
+
+    print(f"\n  SPY B&H (same OOS): return={spy_bh_m.get('total_return',0)*100:+.1f}%  "
+          f"Sharpe={spy_bh_m.get('sharpe',0):.2f}")
 
     # ── Save report ───────────────────────────────────────────────────────
     save_report(wf_results, agg_m, spy_bh_wf, bal_wf, mc, closes, combined_vals, spy)

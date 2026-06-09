@@ -16,7 +16,12 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from config import (ADVANCED_LAYER_WEIGHTS, ADVANCED_CAP,
                     ATR_STOP_MULT, ATR_TARGET_MULT,
-                    DRAWDOWN_CIRCUIT_BREAKER, DRAWDOWN_RESUME_PCT)
+                    DRAWDOWN_CIRCUIT_BREAKER, DRAWDOWN_RESUME_PCT,
+                    SPY_REGIME_WINDOW, EARNINGS_BLACKOUT_DAYS, EARNINGS_EXIT_DAYS,
+                    WEEKLY_RSI_PERIOD, WEEKLY_RSI_MAX,
+                    RSI_OVERSOLD, RSI_DEEP_OVERSOLD, RSI_OVERBOUGHT,
+                    VOLUME_SURGE_MIN, RS3M_BULL_THRESH, RS3M_BEAR_THRESH,
+                    MIN_BUY_SCORE, MAX_SELL_SCORE)
 from advanced_strategies import find_cointegrated_pairs, train_ml_model, combine_signals
 
 STARTING_CASH = 10000.00
@@ -27,8 +32,9 @@ PERFORMANCE_FILE = os.path.join(VAULT, "performance.json")
 STOP_LOSS_PCT = 0.05
 TAKE_PROFIT_PCT = 0.15
 MAX_POSITION_PCT = 0.20
-RSI_OVERSOLD = 35
-RSI_OVERBOUGHT = 70
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
 client = anthropic.Anthropic()
 
@@ -53,8 +59,12 @@ def _retry(max_retries=3, delays=(2, 4, 8), reraise=False):
     return decorator
 
 @_retry(max_retries=3, delays=(2, 4, 8), reraise=False)
-def _fetch_history(symbol, period="60d"):
+def _fetch_history(symbol, period="70d"):
     return yf.Ticker(symbol).history(period=period)
+
+@_retry(max_retries=3, delays=(2, 4, 8), reraise=False)
+def _fetch_history_weekly(symbol, period="6mo"):
+    return yf.Ticker(symbol).history(period=period, interval="1wk")
 
 @_retry(max_retries=3, delays=(2, 4, 8), reraise=False)
 def _fetch_sp500_history():
@@ -63,6 +73,95 @@ def _fetch_sp500_history():
 @_retry(max_retries=3, delays=(2, 4, 8), reraise=True)
 def _batch_download(tickers, period, **kwargs):
     return yf.download(tickers, period=period, **kwargs)
+
+# ── SPY 200-day regime filter ─────────────────────────────────────────────────
+
+def get_spy_regime():
+    """Return (is_bull, spy_close, spy_ma200). Defaults to bull on error to avoid false blocks."""
+    try:
+        hist = _fetch_history("SPY", "1y")
+        if hist is None or len(hist) < SPY_REGIME_WINDOW:
+            return True, None, None
+        closes = hist["Close"].values.astype(float)
+        spy_close = round(float(closes[-1]), 2)
+        spy_ma200 = round(float(np.mean(closes[-SPY_REGIME_WINDOW:])), 2)
+        return bool(spy_close > spy_ma200), spy_close, spy_ma200
+    except Exception as e:
+        print(f"  [regime] SPY 200MA check failed ({e}), defaulting to BULL")
+        return True, None, None
+
+
+# ── Earnings blackout ─────────────────────────────────────────────────────────
+
+def get_earnings_date(symbol):
+    """Return next earnings date as datetime.date, or None if unavailable."""
+    try:
+        cal = yf.Ticker(symbol).calendar
+        if cal is None:
+            return None
+        # yfinance returns DataFrame or dict depending on version
+        if isinstance(cal, pd.DataFrame):
+            if "Earnings Date" in cal.index:
+                val = cal.loc["Earnings Date"].iloc[0]
+            elif len(cal) > 0:
+                val = cal.iloc[0, 0]
+            else:
+                return None
+        elif isinstance(cal, dict):
+            val = cal.get("Earnings Date") or cal.get("earningsDate")
+            if isinstance(val, (list, np.ndarray)):
+                val = val[0] if len(val) > 0 else None
+        else:
+            return None
+        if val is None or (hasattr(val, "__class__") and pd.isna(val)):
+            return None
+        return pd.Timestamp(val).date()
+    except Exception:
+        return None
+
+
+def earnings_blackout_check(symbol, earnings_date):
+    """Return (skip_entirely, force_sell, days_to_earnings)."""
+    if earnings_date is None:
+        return False, False, None
+    today = datetime.now().date()
+    days = (earnings_date - today).days
+    return days <= EARNINGS_BLACKOUT_DAYS, days <= EARNINGS_EXIT_DAYS, days
+
+
+# ── Multi-timeframe weekly signal ─────────────────────────────────────────────
+
+def get_weekly_signal(symbol):
+    """Return (weekly_bullish, weekly_rsi, weekly_macd_hist). Defaults True on error."""
+    try:
+        hist = _fetch_history_weekly(symbol)
+        if hist is None or len(hist) < 15:
+            return True, None, None
+        closes = hist["Close"].values.astype(float)
+        w_rsi = calculate_rsi(closes, period=WEEKLY_RSI_PERIOD)
+        _, _, w_macd_hist = calculate_macd(closes)
+        weekly_bullish = bool(w_rsi < WEEKLY_RSI_MAX and w_macd_hist > 0)
+        return weekly_bullish, round(w_rsi, 2), round(w_macd_hist, 4)
+    except Exception as e:
+        print(f"  [weekly] {symbol} weekly signal failed ({e}), defaulting to bullish")
+        return True, None, None
+
+
+# ── Telegram alerts ───────────────────────────────────────────────────────────
+
+def send_telegram(msg):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        import urllib.request as _ur
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": msg}).encode()
+        req = _ur.Request(url, data=data, headers={"Content-Type": "application/json"})
+        with _ur.urlopen(req, timeout=5):
+            pass
+    except Exception as e:
+        print(f"  [telegram] Failed to send alert: {e}")
+
 
 # ── Advanced signal cache (rebuilt at most once per calendar day) ─────────────
 _PRICE_CACHE = {"df": None, "date": None}
@@ -123,9 +222,13 @@ def load_portfolio():
             p = json.load(f)
         p.setdefault("peak_value", STARTING_CASH)
         p.setdefault("drawdown_halted", False)
+        p.setdefault("spy_regime", "BULL")
+        p.setdefault("spy_close", None)
+        p.setdefault("spy_ma200", None)
         return p
     return {"cash": STARTING_CASH, "holdings": {}, "trades": [], "sessions": 0,
-            "peak_value": STARTING_CASH, "drawdown_halted": False}
+            "peak_value": STARTING_CASH, "drawdown_halted": False,
+            "spy_regime": "BULL", "spy_close": None, "spy_ma200": None}
 
 def save_portfolio(p):
     with open(PORTFOLIO_FILE, "w") as f:
@@ -191,11 +294,11 @@ def calculate_atr(hist, period=14):
 
 def get_stock_data(symbol):
     try:
-        hist = _fetch_history(symbol, "60d")
+        hist = _fetch_history(symbol, "70d")
         if hist is None or hist.empty or len(hist) < 30:
             return None
-        closes = hist["Close"].values
-        volumes = hist["Volume"].values
+        closes = hist["Close"].values.astype(float)
+        volumes = hist["Volume"].values.astype(float)
         current = round(float(closes[-1]), 2)
         prev = round(float(closes[-2]), 2)
         rsi = calculate_rsi(closes)
@@ -207,12 +310,14 @@ def get_stock_data(symbol):
         price_range = recent_high - recent_low
         price_pos = round((current - recent_low) / price_range * 100, 1) if price_range > 0 else 50
         atr = calculate_atr(hist)
+        ma50 = round(float(np.mean(closes[-50:])), 2) if len(closes) >= 50 else None
+        return_3m = round((closes[-1] - closes[-63]) / closes[-63] * 100, 2) if len(closes) >= 63 else None
         return {
             "symbol": symbol, "price": current, "change_pct": round((current-prev)/prev*100,2),
             "volume": int(volumes[-1]), "volume_ratio": vol_ratio,
             "rsi": rsi, "macd_histogram": macd_hist, "macd": macd, "macd_signal": macd_sig,
             "trend_5d": trend_5d, "recent_high": recent_high, "recent_low": recent_low,
-            "price_position": price_pos, "atr": atr,
+            "price_position": price_pos, "atr": atr, "ma50": ma50, "return_3m": return_3m,
         }
     except Exception as e:
         print(f"  Error: {e}")
@@ -240,31 +345,64 @@ def get_headlines(symbol):
     except:
         return []
 
-def evaluate_signals(data):
+def evaluate_signals(data, spy3m_return=None):
+    """New signal stack v2: RSI primary gate, 50MA bias, volume surge, 3m RS vs SPY.
+    MACD and 5-day trend dropped — zero OOS predictive power confirmed.
+    Returns (signals, score, rsi_gate) where rsi_gate=True means RSI<35 gate passes."""
     signals, score = [], 0
-    if data["rsi"] < RSI_OVERSOLD:
-        signals.append(f"RSI={data['rsi']} OVERSOLD (bullish)"); score += 2
-    elif data["rsi"] > RSI_OVERBOUGHT:
-        signals.append(f"RSI={data['rsi']} OVERBOUGHT (avoid buying)"); score -= 2
+
+    # RSI — PRIMARY GATE + score (only validated signal from OOS diagnostic)
+    rsi = data["rsi"]
+    rsi_gate = rsi < RSI_OVERSOLD
+    if rsi < RSI_DEEP_OVERSOLD:
+        signals.append(f"RSI={rsi} DEEPLY OVERSOLD — strong entry signal"); score += 3
+    elif rsi < RSI_OVERSOLD:
+        signals.append(f"RSI={rsi} OVERSOLD — primary gate passes"); score += 2
+    elif rsi > RSI_OVERBOUGHT:
+        signals.append(f"RSI={rsi} OVERBOUGHT — avoid buying"); score -= 2
     else:
-        signals.append(f"RSI={data['rsi']} neutral")
-    if data["macd_histogram"] > 0:
-        signals.append(f"MACD hist={data['macd_histogram']} bullish"); score += 2
+        signals.append(f"RSI={rsi} neutral (gate BLOCKED — BUY requires RSI<{RSI_OVERSOLD})")
+
+    # 50-day MA bias (replaces MACD — zero OOS edge confirmed for MACD)
+    ma50 = data.get("ma50")
+    if ma50 is not None:
+        if data["price"] > ma50:
+            signals.append(f"Price ${data['price']} > 50MA ${ma50} — bullish trend bias"); score += 2
+        else:
+            signals.append(f"Price ${data['price']} < 50MA ${ma50} — bearish bias"); score -= 1
     else:
-        signals.append(f"MACD hist={data['macd_histogram']} bearish"); score -= 1
-    if data["volume_ratio"] >= 1.5:
-        signals.append(f"Volume {data['volume_ratio']}x — strong"); score += 1
+        signals.append("50MA: insufficient history")
+
+    # Volume surge — confirmation signal
+    if data["volume_ratio"] >= VOLUME_SURGE_MIN:
+        signals.append(f"Volume {data['volume_ratio']}x 20d avg — surge confirmation"); score += 2
     elif data["volume_ratio"] < 0.8:
-        signals.append(f"Volume {data['volume_ratio']}x — weak"); score -= 1
-    if data["trend_5d"] > 2:
-        signals.append(f"5d trend +{data['trend_5d']}% uptrend"); score += 2
-    elif data["trend_5d"] < -2:
-        signals.append(f"5d trend {data['trend_5d']}% downtrend"); score -= 2
+        signals.append(f"Volume {data['volume_ratio']}x — low conviction"); score -= 1
+    else:
+        signals.append(f"Volume {data['volume_ratio']}x — normal")
+
+    # 3-month relative strength vs SPY (replaces 5-day trend — zero OOS edge confirmed)
+    rs3m = None
+    if data.get("return_3m") is not None and spy3m_return is not None:
+        rs3m = round(data["return_3m"] - spy3m_return, 2)
+        if rs3m >= RS3M_BULL_THRESH:
+            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% outperforming — momentum"); score += 2
+        elif rs3m <= RS3M_BEAR_THRESH:
+            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% underperforming — weak"); score -= 1
+        else:
+            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% neutral")
+    else:
+        signals.append("3m RS: insufficient data")
+
+    # Price position in 20d range — support/resistance context
     if data["price_position"] < 30:
-        signals.append(f"Near 20d low — support zone"); score += 1
+        signals.append("Near 20d low — support zone"); score += 1
     elif data["price_position"] > 80:
-        signals.append(f"Near 20d high — resistance"); score -= 1
-    return signals, score
+        signals.append("Near 20d high — resistance zone"); score -= 1
+
+    # Attach rs3m to data for downstream use
+    data["rs3m"] = rs3m
+    return signals, score, rsi_gate
 
 def check_stop_take(portfolio, data):
     sym = data["symbol"]
@@ -291,20 +429,30 @@ def check_stop_take(portfolio, data):
             return "SELL", f"TAKE-PROFIT: {pnl_pct*100:+.2f}% gain"
     return None, None
 
-def ask_claude(data, portfolio, headlines, signals, score, sp500):
+def ask_claude(data, portfolio, headlines, signals, score, sp500, rsi_gate=True,
+               spy_regime=True, weekly_bullish=True):
     total = portfolio["cash"] + sum(h["shares"]*h["avg_price"] for h in portfolio["holdings"].values())
     max_shares = int(total * MAX_POSITION_PCT / data["price"])
     held = portfolio["holdings"].get(data["symbol"])
     held_info = f"Holding {held['shares']} shares @ avg ${held['avg_price']}" if held else "No position"
-    bias = "BULLISH" if score >= 3 else "BEARISH" if score <= -3 else "NEUTRAL"
+    bias = "BULLISH" if score >= MIN_BUY_SCORE else "BEARISH" if score <= MAX_SELL_SCORE else "NEUTRAL"
     news = chr(10).join([f"- {h}" for h in headlines]) if headlines else "- None available"
     sigs = chr(10).join([f"- {s}" for s in signals])
+    ma50_str = f"${data['ma50']}" if data.get("ma50") else "N/A"
+    rs3m_str = f"{data.get('rs3m', 0):+.1f}%" if data.get("rs3m") is not None else "N/A"
+    gates_blocked = []
+    if not rsi_gate:      gates_blocked.append(f"RSI={data['rsi']} >= {RSI_OVERSOLD}")
+    if not spy_regime:    gates_blocked.append("SPY < 200MA (bear market)")
+    if not weekly_bullish: gates_blocked.append("weekly signal bearish")
+    gates_str = "BLOCKED: " + ", ".join(gates_blocked) if gates_blocked else "all clear"
     prompt = f"""Analyze {data["symbol"]} and decide BUY/SELL/HOLD.
 
-PRICE: ${data["price"]} ({data["change_pct"]:+.2f}% today) | 5d trend: {data["trend_5d"]:+.2f}%
-RSI: {data["rsi"]} | MACD histogram: {data["macd_histogram"]} | Volume: {data["volume_ratio"]}x avg
+PRICE: ${data["price"]} ({data["change_pct"]:+.2f}% today)
+RSI: {data["rsi"]} | 50MA: {ma50_str} | Volume: {data["volume_ratio"]}x avg | 3m RS vs SPY: {rs3m_str}
 Price position: {data["price_position"]}% of 20d range (0=low, 100=high)
 Score: {score} (blended) — {bias}
+
+BUY gates: {gates_str}
 
 Signals:
 {sigs}
@@ -315,7 +463,11 @@ News:
 S&P 500 today: {sp500:+.2f}%
 Cash: ${portfolio["cash"]:,.2f} | {held_info} | Max buy: {max_shares} shares
 
-Rules: Only BUY if RSI<70 AND MACD hist>0 AND volume>0.8x. SELL if stop-loss/take-profit hit.
+Rules:
+- BUY requires: RSI<{RSI_OVERSOLD} (primary gate), SPY>200MA, weekly signal bullish, score>={MIN_BUY_SCORE}
+- RSI diagnostic: only RSI<35 has validated OOS edge (+8.2pp hit rate); MACD/trend have zero edge
+- SELL if stop-loss/take-profit hit OR score<={MAX_SELL_SCORE}
+- If any BUY gate is BLOCKED, reply HOLD
 
 Reply EXACTLY:
 DECISION: [BUY/SELL/HOLD]
@@ -345,8 +497,10 @@ def parse_decision(response):
         elif line.startswith("REASONING:"): reasoning = line.split(":",1)[1].strip()
     return decision, shares, confidence, reasoning
 
-def execute_trade(portfolio, decision, shares, symbol, price, reasoning, atr=None):
+def execute_trade(portfolio, decision, shares, symbol, price, reasoning, atr=None,
+                  rsi=None, blended_score=None, spy_regime=True):
     perf = load_performance()
+    regime_str = "BULL" if spy_regime else "BEAR"
     if decision == "BUY" and shares > 0:
         cost = shares * price
         if cost > portfolio["cash"]:
@@ -361,11 +515,14 @@ def execute_trade(portfolio, decision, shares, symbol, price, reasoning, atr=Non
             h["avg_price"] = round((h["shares"]*h["avg_price"] + cost) / total_s, 2)
             h["shares"] = total_s
             if atr is not None:
-                h["atr"] = atr  # refresh ATR on scale-in
+                h["atr"] = atr
         else:
             portfolio["holdings"][symbol] = {"shares": shares, "avg_price": price, "atr": atr}
         portfolio["trades"].append({"action":"BUY","symbol":symbol,"shares":shares,"price":price,"time":datetime.now().strftime("%Y-%m-%d %H:%M"),"reasoning":reasoning[:100]})
         print(f"  ✅ BUY {shares} shares of {symbol} @ ${price}")
+        rsi_str = f" | RSI:{rsi}" if rsi is not None else ""
+        score_str = f" | Score:{blended_score:+d}" if blended_score is not None else ""
+        send_telegram(f"🟢 BUY {symbol} — {shares} shares @ ${price}{rsi_str} | Regime:{regime_str}{score_str}")
     elif decision == "SELL" and symbol in portfolio["holdings"]:
         h = portfolio["holdings"][symbol]
         proceeds = round(h["shares"] * price, 2)
@@ -378,6 +535,8 @@ def execute_trade(portfolio, decision, shares, symbol, price, reasoning, atr=Non
         portfolio["trades"].append({"action":"SELL","symbol":symbol,"shares":h["shares"],"price":price,"time":datetime.now().strftime("%Y-%m-%d %H:%M"),"realized_pnl":pnl})
         save_performance(perf)
         print(f"  ✅ SELL {h['shares']} shares of {symbol} @ ${price} | P&L: ${pnl:+.2f}")
+        emoji = "🟩" if pnl >= 0 else "🔴"
+        send_telegram(f"{emoji} SELL {symbol} — {h['shares']} shares @ ${price} | P&L: ${pnl:+.2f} | {reasoning[:60]}")
 
 def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data, signals, score, adv_detail=None, adv_contrib=None):
     trades_dir = os.path.join(VAULT, "Trades")
@@ -408,14 +567,39 @@ def run_trading_session():
     portfolio = load_portfolio()
     portfolio["sessions"] = portfolio.get("sessions", 0) + 1
     sp500_change, sp500_price = get_sp500_change()
+
+    # ── 1. SPY 200-day regime filter ──────────────────────────────────────────
+    spy_is_bull, spy_close, spy_ma200 = get_spy_regime()
+    regime_label = "BULL" if spy_is_bull else "BEAR"
+    portfolio["spy_regime"] = regime_label
+    portfolio["spy_close"]  = spy_close
+    portfolio["spy_ma200"]  = spy_ma200
+
+    # ── 2. Compute SPY 3-month return (for RS signal) ─────────────────────────
+    spy3m_return = None
+    try:
+        spy_hist = _fetch_history("SPY", "70d")
+        if spy_hist is not None and len(spy_hist) >= 63:
+            spy3m_return = round((float(spy_hist["Close"].iloc[-1]) - float(spy_hist["Close"].iloc[-63]))
+                                  / float(spy_hist["Close"].iloc[-63]) * 100, 2)
+    except Exception:
+        pass
+
     print(f"\n{'='*55}")
     print(f"🤖 FridayTrader v3 — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📊 S&P 500: {sp500_change:+.2f}% | Cash: ${portfolio['cash']:,.2f}")
     print(f"Holdings: {list(portfolio['holdings'].keys())}")
+    spy_detail = f"${spy_close} vs 200MA ${spy_ma200}" if spy_close else "N/A"
+    if spy_is_bull:
+        print(f"  📈 Market regime: BULL ({spy_detail}) — normal operation")
+    else:
+        print(f"  🐻 Market regime: BEAR ({spy_detail}) — new BUYs HALTED")
+        send_telegram(f"🐻 Market regime: BEAR — SPY ${spy_close} < 200MA ${spy_ma200}. BUYs halted.")
     if portfolio.get("drawdown_halted"):
         print(f"  ⚠️  Drawdown circuit breaker ACTIVE — new BUYs halted until recovery")
     print(f"{'='*55}\n")
-    # ── Build advanced signals once for this session ──────────────────────────
+
+    # ── 3. Build advanced signals once for this session ───────────────────────
     adv_combined, adv_detail = {}, {}
     try:
         frame = get_price_frame()
@@ -425,42 +609,81 @@ def run_trading_session():
         print(f"  [adv] Advanced signals ready for {len(adv_combined)} symbols\n")
     except Exception as e:
         print(f"  [adv] Advanced layer error (proceeding without): {e}\n")
-    # ──────────────────────────────────────────────────────────────────────────
 
     current_prices = {}
     session_signals = []
+
     for symbol in WATCHLIST:
         print(f"\n📊 Analyzing {symbol}...")
+
+        # ── Earnings blackout check ───────────────────────────────────────────
+        earnings_date = get_earnings_date(symbol)
+        skip_buy, force_sell_earnings, days_to_earnings = earnings_blackout_check(symbol, earnings_date)
+        if days_to_earnings is not None and days_to_earnings >= 0:
+            print(f"  📅 Earnings in {days_to_earnings} day(s): {earnings_date}")
+
         data = get_stock_data(symbol)
         if not data:
             continue
         current_prices[symbol] = data["price"]
-        print(f"  ${data['price']} ({data['change_pct']:+.2f}%) | RSI:{data['rsi']} | MACD:{data['macd_histogram']} | 5d:{data['trend_5d']:+.2f}% | Vol:{data['volume_ratio']}x")
+        ma50_str = f"50MA:${data['ma50']}" if data.get("ma50") else "50MA:N/A"
+        rs3m_str = f"RS3m:{data['return_3m']:+.1f}%" if data.get("return_3m") is not None else ""
+        print(f"  ${data['price']} ({data['change_pct']:+.2f}%) | RSI:{data['rsi']} | {ma50_str} | Vol:{data['volume_ratio']}x | {rs3m_str}")
+
+        # ── Stop/take-profit check (overrides everything) ─────────────────────
         auto_dec, auto_reason = check_stop_take(portfolio, data)
+
+        # ── Earnings forced exit ──────────────────────────────────────────────
+        if not auto_dec and force_sell_earnings and symbol in portfolio["holdings"]:
+            auto_dec = "SELL"
+            auto_reason = f"Earnings blackout: earnings in {days_to_earnings} day(s) on {earnings_date}"
+            print(f"  📅 Forced SELL: {auto_reason}")
+
         if auto_dec:
             print(f"  🚨 Auto-{auto_dec}: {auto_reason}")
-            execute_trade(portfolio, auto_dec, 0, symbol, data["price"], auto_reason)
-            signals, score = evaluate_signals(data)
-            log_to_obsidian(symbol, auto_dec, 0, data["price"], "HIGH", auto_reason, data, signals, score, adv_detail)
+            execute_trade(portfolio, auto_dec, 0, symbol, data["price"], auto_reason,
+                          spy_regime=spy_is_bull)
+            signals, score, rsi_gate = evaluate_signals(data, spy3m_return)
+            log_to_obsidian(symbol, auto_dec, 0, data["price"], "HIGH", auto_reason,
+                            data, signals, score, adv_detail)
             continue
-        signals, score = evaluate_signals(data)
 
-        # Blend advanced score — cap contribution so it nudges, never dominates
-        adv_raw    = adv_combined.get(symbol, 0)
+        # ── Skip entirely if earnings blackout ────────────────────────────────
+        if skip_buy and symbol not in portfolio["holdings"]:
+            print(f"  ⛔ {symbol}: earnings blackout ({days_to_earnings} days to {earnings_date}) — skipping")
+            continue
+
+        # ── Compute signals ───────────────────────────────────────────────────
+        signals, score, rsi_gate = evaluate_signals(data, spy3m_return)
+
+        # ── Weekly MTF check ──────────────────────────────────────────────────
+        weekly_bullish, w_rsi, w_macd_hist = get_weekly_signal(symbol)
+        if not weekly_bullish and w_rsi is not None:
+            print(f"  📉 Weekly: RSI={w_rsi} / MACD={w_macd_hist} — bearish (BUY blocked by MTF)")
+        elif w_rsi is not None:
+            print(f"  📈 Weekly: RSI={w_rsi} / MACD={w_macd_hist} — bullish")
+
+        # ── Advanced layer blend ──────────────────────────────────────────────
+        adv_raw     = adv_combined.get(symbol, 0)
         adv_contrib = max(-ADVANCED_CAP, min(ADVANCED_CAP, adv_raw))
         blended_score = score + adv_contrib
         adv_line = _fmt_adv_detail(symbol, adv_detail)
         print(f"  [adv] {symbol}: tech={score:+d}, adv={adv_contrib:+d} → blended={blended_score:+d} | {adv_line}")
 
-        # Collect signal snapshot for dashboard signals.json
+        # ── Signal snapshot for dashboard ─────────────────────────────────────
         reg_d  = adv_detail.get("regime", {}).get(symbol, {})
         ml_d   = adv_detail.get("ml", {}).get(symbol, {})
         pair_d = adv_detail.get("pairs", {})
         pair_str = next((f"{k}(z={v['z']:+.1f})" for k, v in pair_d.items() if symbol in k), "none")
         session_signals.append({
             "sym": symbol, "price": data["price"],
-            "rsi": data["rsi"], "macd_hist": data["macd_histogram"],
+            "rsi": data["rsi"], "ma50": data.get("ma50"),
+            "rs3m": data.get("rs3m"),
             "tech_score": score,
+            "rsi_gate": rsi_gate,
+            "weekly_rsi": w_rsi, "weekly_macd": w_macd_hist, "weekly_bullish": weekly_bullish,
+            "earnings_date": str(earnings_date) if earnings_date else None,
+            "earnings_days": days_to_earnings,
             "regime": reg_d.get("regime", "UNKNOWN"),
             "regime_score": reg_d.get("score", 0),
             "ml_prob": ml_d.get("prob_up"),
@@ -472,20 +695,41 @@ def run_trading_session():
 
         headlines = get_headlines(symbol)
         print(f"  🧠 Asking Claude (blended score: {blended_score})...")
-        response = ask_claude(data, portfolio, headlines, signals, blended_score, sp500_change)
+        response = ask_claude(data, portfolio, headlines, signals, blended_score, sp500_change,
+                              rsi_gate=rsi_gate, spy_regime=spy_is_bull, weekly_bullish=weekly_bullish)
         decision, shares, confidence, reasoning = parse_decision(response)
         print(f"  Decision: {decision} {shares} shares ({confidence})")
         print(f"  {reasoning[:80]}")
-        if decision == "BUY" and portfolio.get("drawdown_halted"):
-            print(f"  🚫 BUY blocked: drawdown circuit breaker active")
-            decision = "HOLD"
+
+        # ── Hard-gate enforcement (server-side, overrides Claude) ─────────────
+        if decision == "BUY":
+            if not rsi_gate:
+                print(f"  🚫 BUY blocked: RSI={data['rsi']} >= {RSI_OVERSOLD} (primary gate)")
+                send_telegram(f"⚠️ {symbol}: Claude said BUY but RSI={data['rsi']} blocked (gate requires <{RSI_OVERSOLD})")
+                decision = "HOLD"
+            elif not spy_is_bull:
+                print(f"  🚫 BUY blocked: SPY in BEAR regime (SPY ${spy_close} < 200MA ${spy_ma200})")
+                decision = "HOLD"
+            elif not weekly_bullish:
+                print(f"  🚫 BUY blocked: weekly signal bearish (RSI={w_rsi}, MACD={w_macd_hist})")
+                print(f"  📋 {symbol}: daily=BUY but weekly=BEARISH — skipping")
+                decision = "HOLD"
+            elif portfolio.get("drawdown_halted"):
+                print(f"  🚫 BUY blocked: drawdown circuit breaker active")
+                decision = "HOLD"
+            elif skip_buy:
+                print(f"  🚫 BUY blocked: earnings blackout ({days_to_earnings} days)")
+                decision = "HOLD"
+
         if decision in ("BUY", "SELL"):
             execute_trade(portfolio, decision, shares, symbol, data["price"], reasoning,
-                          atr=data.get("atr"))
+                          atr=data.get("atr"), rsi=data["rsi"], blended_score=blended_score,
+                          spy_regime=spy_is_bull)
         else:
             print(f"  ⏸️  HOLD")
         log_to_obsidian(symbol, decision, shares, data["price"], confidence, reasoning,
                         data, signals, blended_score, adv_detail, adv_contrib)
+
     total = portfolio["cash"] + sum(h["shares"]*current_prices.get(s, h["avg_price"]) for s,h in portfolio["holdings"].items())
 
     # ── Drawdown circuit breaker: update peak and halted flag ─────────────────
@@ -496,11 +740,14 @@ def run_trading_session():
     dd_pct = (peak - total) / peak if peak > 0 else 0.0
     if dd_pct >= DRAWDOWN_CIRCUIT_BREAKER and not portfolio.get("drawdown_halted"):
         portfolio["drawdown_halted"] = True
-        print(f"  🚨 Drawdown circuit breaker TRIGGERED: {dd_pct*100:.1f}% below peak (${peak:,.2f})")
+        msg = f"🚨 CIRCUIT BREAKER: BUYs halted | DD: {dd_pct*100:.1f}% from peak ${peak:,.2f}"
+        print(f"  {msg}")
+        send_telegram(msg)
     elif portfolio.get("drawdown_halted") and dd_pct < DRAWDOWN_RESUME_PCT:
         portfolio["drawdown_halted"] = False
-        print(f"  ✅ Drawdown circuit breaker CLEARED: {dd_pct*100:.1f}% below peak")
-    # ─────────────────────────────────────────────────────────────────────────
+        msg = f"✅ Circuit breaker cleared: {dd_pct*100:.1f}% below peak"
+        print(f"  {msg}")
+        send_telegram(msg)
 
     pnl = total - STARTING_CASH
     perf = load_performance()
@@ -515,10 +762,14 @@ def run_trading_session():
         print(f"  [warn] Could not save signals.json: {e}")
     total_closed = perf.get("win_trades",0) + perf.get("loss_trades",0)
     wr = perf["win_trades"]/total_closed*100 if total_closed > 0 else 0
+    summary = (f"📊 Session complete | Portfolio: ${total:,.2f} | "
+               f"P&L: ${pnl:+,.2f} ({pnl/STARTING_CASH*100:+.2f}%) | "
+               f"Win Rate: {wr:.1f}% | Regime: {regime_label}")
     print(f"\n{'='*55}")
     print(f"📈 Session Complete! Portfolio: ${total:,.2f} | P&L: ${pnl:+,.2f} ({pnl/STARTING_CASH*100:+.2f}%)")
     print(f"🏆 Win Rate: {wr:.1f}% | Cash: ${portfolio['cash']:,.2f}")
     print(f"{'='*55}\n")
+    send_telegram(summary)
 
 def run_scheduler():
     print("🚀 FridayTrader v3 — RSI + MACD + Volume + 5-Day Trend")

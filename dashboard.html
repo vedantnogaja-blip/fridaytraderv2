@@ -799,57 +799,106 @@ function renderWatchlist(prices, holdings) {
 // ── Signal Debug Tab ──────────────────────────────────────────────────────────
 async function loadSignals() {
   try {
-    const res = await fetch('/signals?'+Date.now());
-    const data = await res.json();
+    const [sigRes, portRes] = await Promise.all([
+      fetch('/signals?'+Date.now()),
+      fetch('/portfolio.json?'+Date.now())
+    ]);
+    const data = await sigRes.json();
+    const port = await portRes.json();
     signalsLoaded = true;
     const ts = data.timestamp;
     document.getElementById('signalsTimestamp').textContent = ts ? 'Updated '+ts : 'No data yet';
     const signals = data.signals || [];
     const el = document.getElementById('signalsContent');
     const updLine = document.getElementById('signalsUpdatedLine');
+
+    // SPY regime banner
+    const spyRegime = port.spy_regime || 'BULL';
+    const spyClose  = port.spy_close  ? '$'+port.spy_close : '—';
+    const spyMa200  = port.spy_ma200  ? '$'+port.spy_ma200 : '—';
+    const regimeColor = spyRegime === 'BULL' ? '#10b981' : '#ef4444';
+    const regimeBg    = spyRegime === 'BULL' ? '#ecfdf5'  : '#fef2f2';
+    const regimeIcon  = spyRegime === 'BULL' ? '📈' : '🐻';
+    const regimeHtml  = `<div style="background:${regimeBg};border:1px solid ${regimeColor}30;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:12px;">
+      <span style="font-size:20px">${regimeIcon}</span>
+      <div><strong style="color:${regimeColor}">Market Regime: ${spyRegime}</strong>
+      <span style="color:var(--text2);font-size:13px;margin-left:12px">SPY ${spyClose} vs 200MA ${spyMa200}</span>
+      ${spyRegime === 'BEAR' ? '<span style="color:#ef4444;font-weight:600;font-size:12px;margin-left:8px">— ALL BUYs HALTED</span>' : ''}</div>
+    </div>`;
+
     if (!ts || !signals.length) {
-      el.innerHTML = '<div class="empty">No signal data yet. Run the trader to populate this table.</div>';
+      el.innerHTML = regimeHtml + '<div class="empty">No signal data yet. Run the trader to populate this table.</div>';
       updLine.style.display = 'none';
       return;
     }
-    el.innerHTML = '<div style="overflow-x:auto"><table class="sig-table">' +
+    el.innerHTML = regimeHtml + '<div style="overflow-x:auto"><table class="sig-table">' +
       '<thead><tr>' +
       '<th>Symbol</th>' +
       '<th>Price</th>' +
-      '<th title="RSI&lt;35: proven +8.2pp edge">RSI</th>' +
-      '<th>MACD Hist <span class="no-edge" title="No predictive edge in OOS testing">⚠ no edge</span></th>' +
-      '<th>Tech Score <span class="no-edge" title="5-day trend showed no edge in OOS testing">⚠ no edge</span></th>' +
-      '<th>Regime</th>' +
-      '<th>ML Prob</th>' +
-      '<th>Pairs</th>' +
-      '<th>Blended Score</th>' +
-      '<th>Adv Contrib</th>' +
+      '<th title="RSI PRIMARY GATE — only validated signal (+8.2pp OOS edge). BUY requires RSI&lt;35.">RSI ✓gate</th>' +
+      '<th title="50-day moving average — replaces MACD (zero OOS edge)">vs 50MA</th>' +
+      '<th title="3-month relative strength vs SPY — replaces 5d trend (zero OOS edge)">3m RS</th>' +
+      '<th title="Weekly RSI(5) / MACD — multi-timeframe confirmation">Weekly</th>' +
+      '<th title="Days to next earnings report">Earnings</th>' +
+      '<th>Score</th>' +
+      '<th>Adv</th>' +
+      '<th>Blended</th>' +
       '</tr></thead>' +
       '<tbody id="sigTableBody"></tbody>' +
       '</table></div>';
     document.getElementById('sigTableBody').innerHTML = signals.map(function(s) {
-      const rsiVal = s.rsi != null ? s.rsi.toFixed(1) : '—';
-      const rsiClass = s.rsi != null ? (s.rsi < 35 ? 'rsi-green' : s.rsi > 70 ? 'rsi-orange' : '') : '';
-      const macd = s.macd_hist != null ? s.macd_hist.toFixed(3) : '—';
-      const techScore = s.tech_score != null ? s.tech_score : '—';
-      const regime = s.regime || '—';
-      const mlProb = s.ml_prob != null ? (s.ml_prob*100).toFixed(1)+'%' : '—';
-      const pairs = s.pairs != null ? s.pairs.toFixed(3) : '—';
-      const blended = s.blended_score != null ? s.blended_score.toFixed(2) : '—';
-      const blendedClass = s.blended_score != null ? (s.blended_score > 2 ? 'blended-pos' : s.blended_score < -2 ? 'blended-neg' : '') : '';
-      const advContrib = s.adv_contrib != null ? s.adv_contrib.toFixed(3) : '—';
+      const rsiVal  = s.rsi != null ? s.rsi.toFixed(1) : '—';
+      const rsiGate = s.rsi_gate;
+      const rsiClass = s.rsi < 25 ? 'rsi-green' : (s.rsi < 35 ? 'rsi-green' : (s.rsi > 70 ? 'rsi-orange' : ''));
+      const rsiGateIcon = rsiGate ? ' ✓' : ' ✗';
+      const rsiDisplay = `<span class="${rsiClass}">${rsiVal}${rsiGateIcon}</span>`;
+
+      // 50MA comparison
+      let ma50Disp = '—';
+      if (s.ma50 != null && s.price != null) {
+        const aboveMa = s.price > s.ma50;
+        ma50Disp = `<span style="color:${aboveMa?'#10b981':'#ef4444'}">${aboveMa?'▲':'▼'} $${s.ma50.toFixed(0)}</span>`;
+      }
+
+      // RS3M
+      let rs3mDisp = '—';
+      if (s.rs3m != null) {
+        const c = s.rs3m >= 5 ? '#10b981' : (s.rs3m <= -5 ? '#ef4444' : 'var(--text2)');
+        rs3mDisp = `<span style="color:${c}">${s.rs3m > 0 ? '+' : ''}${s.rs3m.toFixed(1)}%</span>`;
+      }
+
+      // Weekly MTF
+      let weeklyDisp = '—';
+      if (s.weekly_rsi != null) {
+        const wb = s.weekly_bullish;
+        const wc = wb ? '#10b981' : '#ef4444';
+        weeklyDisp = `<span style="color:${wc}">${wb ? '✓' : '✗'} RSI${s.weekly_rsi.toFixed(0)}</span>`;
+      }
+
+      // Earnings
+      let earningsDisp = '—';
+      if (s.earnings_days != null) {
+        const d = s.earnings_days;
+        const ec = d <= 2 ? '#ef4444' : (d <= 3 ? '#f59e0b' : 'var(--text2)');
+        earningsDisp = `<span style="color:${ec}">${d}d</span>`;
+      }
+
+      const score = s.tech_score != null ? (s.tech_score > 0 ? '+' : '') + s.tech_score : '—';
+      const adv = s.adv_contrib != null ? (s.adv_contrib > 0 ? '+' : '') + s.adv_contrib : '—';
+      const blended = s.blended_score != null ? s.blended_score : '—';
+      const blendedClass = s.blended_score != null ? (s.blended_score >= 4 ? 'blended-pos' : (s.blended_score <= -3 ? 'blended-neg' : '')) : '';
       const price = s.price != null ? '$'+s.price.toFixed(2) : '—';
       return '<tr>' +
-        '<td>'+s.symbol+'</td>' +
+        '<td><strong>'+s.sym+'</strong></td>' +
         '<td>'+price+'</td>' +
-        '<td class="'+rsiClass+'">'+rsiVal+'</td>' +
-        '<td>'+macd+'</td>' +
-        '<td>'+techScore+'</td>' +
-        '<td>'+regime+'</td>' +
-        '<td>'+mlProb+'</td>' +
-        '<td>'+pairs+'</td>' +
-        '<td class="'+blendedClass+'">'+blended+'</td>' +
-        '<td>'+advContrib+'</td>' +
+        '<td>'+rsiDisplay+'</td>' +
+        '<td>'+ma50Disp+'</td>' +
+        '<td>'+rs3mDisp+'</td>' +
+        '<td>'+weeklyDisp+'</td>' +
+        '<td>'+earningsDisp+'</td>' +
+        '<td>'+score+'</td>' +
+        '<td>'+adv+'</td>' +
+        '<td class="'+blendedClass+'"><strong>'+(typeof blended === 'number' ? (blended > 0 ? '+' : '') + blended : blended)+'</strong></td>' +
         '</tr>';
     }).join('');
     updLine.style.display = '';
