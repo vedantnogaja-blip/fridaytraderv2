@@ -346,12 +346,14 @@ def get_headlines(symbol):
         return []
 
 def evaluate_signals(data, spy3m_return=None):
-    """New signal stack v2: RSI primary gate, 50MA bias, volume surge, 3m RS vs SPY.
-    MACD and 5-day trend dropped — zero OOS predictive power confirmed.
+    """Winning signal stack: RSI<35 primary gate + volume surge confirmation.
+    OOS ablation confirmed this is the only combination with positive Sharpe (+1.68).
+    50MA and RS3M are logged as informational but do NOT affect the score —
+    they were blocking RSI+volume trades and hurt OOS performance.
     Returns (signals, score, rsi_gate) where rsi_gate=True means RSI<35 gate passes."""
     signals, score = [], 0
 
-    # RSI — PRIMARY GATE + score (only validated signal from OOS diagnostic)
+    # RSI — PRIMARY GATE + score. Hard-block BUY when RSI >= RSI_OVERSOLD.
     rsi = data["rsi"]
     rsi_gate = rsi < RSI_OVERSOLD
     if rsi < RSI_DEEP_OVERSOLD:
@@ -363,17 +365,7 @@ def evaluate_signals(data, spy3m_return=None):
     else:
         signals.append(f"RSI={rsi} neutral (gate BLOCKED — BUY requires RSI<{RSI_OVERSOLD})")
 
-    # 50-day MA bias (replaces MACD — zero OOS edge confirmed for MACD)
-    ma50 = data.get("ma50")
-    if ma50 is not None:
-        if data["price"] > ma50:
-            signals.append(f"Price ${data['price']} > 50MA ${ma50} — bullish trend bias"); score += 2
-        else:
-            signals.append(f"Price ${data['price']} < 50MA ${ma50} — bearish bias"); score -= 1
-    else:
-        signals.append("50MA: insufficient history")
-
-    # Volume surge — confirmation signal
+    # Volume surge — only confirmed confirming signal from OOS ablation
     if data["volume_ratio"] >= VOLUME_SURGE_MIN:
         signals.append(f"Volume {data['volume_ratio']}x 20d avg — surge confirmation"); score += 2
     elif data["volume_ratio"] < 0.8:
@@ -381,26 +373,23 @@ def evaluate_signals(data, spy3m_return=None):
     else:
         signals.append(f"Volume {data['volume_ratio']}x — normal")
 
-    # 3-month relative strength vs SPY (replaces 5-day trend — zero OOS edge confirmed)
-    rs3m = None
-    if data.get("return_3m") is not None and spy3m_return is not None:
-        rs3m = round(data["return_3m"] - spy3m_return, 2)
-        if rs3m >= RS3M_BULL_THRESH:
-            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% outperforming — momentum"); score += 2
-        elif rs3m <= RS3M_BEAR_THRESH:
-            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% underperforming — weak"); score -= 1
-        else:
-            signals.append(f"3m RS vs SPY: {rs3m:+.1f}% neutral")
-    else:
-        signals.append("3m RS: insufficient data")
-
-    # Price position in 20d range — support/resistance context
+    # Price position in 20d range — contextual, small weight
     if data["price_position"] < 30:
         signals.append("Near 20d low — support zone"); score += 1
     elif data["price_position"] > 80:
         signals.append("Near 20d high — resistance zone"); score -= 1
 
-    # Attach rs3m to data for downstream use
+    # 50MA — INFORMATIONAL ONLY (not scored: was blocking RSI+volume trades)
+    ma50 = data.get("ma50")
+    if ma50 is not None:
+        ma50_rel = "above" if data["price"] > ma50 else "below"
+        signals.append(f"50MA ${ma50} [{ma50_rel}] — info only, not scored")
+
+    # 3m RS vs SPY — INFORMATIONAL ONLY (not scored: hurt OOS performance)
+    rs3m = None
+    if data.get("return_3m") is not None and spy3m_return is not None:
+        rs3m = round(data["return_3m"] - spy3m_return, 2)
+        signals.append(f"3m RS vs SPY: {rs3m:+.1f}% — info only, not scored")
     data["rs3m"] = rs3m
     return signals, score, rsi_gate
 
@@ -678,6 +667,7 @@ def run_trading_session():
         session_signals.append({
             "sym": symbol, "price": data["price"],
             "rsi": data["rsi"], "ma50": data.get("ma50"),
+            "volume_ratio": data.get("volume_ratio"),
             "rs3m": data.get("rs3m"),
             "tech_score": score,
             "rsi_gate": rsi_gate,

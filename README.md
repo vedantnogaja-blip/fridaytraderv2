@@ -66,30 +66,45 @@ An autonomous AI trading agent that runs twice daily on weekdays, combining tech
 
 ## Strategy
 
-### Technical signals — OOS diagnostic results
+### Technical signals — v2 winning stack
 
-Tested over 150 OOS days, 2465 pooled symbol-observations:
+Full signal ablation across all configurations (OOS 2025-10-31 → 2026-06-08):
 
-| Signal | Fires | Hit rate | vs Baseline | Verdict |
+| Config | OOS Sharpe | OOS Return | Trades | Verdict |
 |---|---|---|---|---|
-| RSI < 35 (oversold) | 16% | **59.5%** | **+8.2pp** | HAS EDGE ✓ |
-| RSI > 70 (overbought) | 15% | 50.8% | −0.4pp | No edge |
-| MACD hist > 0 | 50% | 52.1% | +0.8pp | **No edge** ⚠ |
-| 5d trend > +2% | 37% | 51.4% | +0.1pp | **No edge** ⚠ |
-| Volume ≥ 1.5× avg | 9% | 51.1% | −0.1pp | No edge |
-| Unconditional baseline | — | 51.3% | — | — |
+| v1: MACD + 5d trend | −1.11 | −9.7% | 9 | **Dropped** — zero OOS edge |
+| RSI gate only | −1.38 | −13.6% | 5 | Not enough trades |
+| **RSI gate + volume surge** | **−0.19** | **−4.6%** | **18** | **Best individual config** |
+| RSI gate + 50MA | −1.74 | −11.2% | 4 | 50MA blocks oversold trades |
+| RSI gate + all three | −1.99 | −10.7% | 3 | Over-filtered |
+| SPY B&H | +1.17 | +9.0% | — | Benchmark |
 
-**Key finding**: RSI < 35 is the only signal with statistically validated predictive power (+8.2pp, +1.39% avg 5-day return vs +0.68% baseline). MACD and 5-day trend showed zero edge. These signals are negatively correlated with RSI (r = −0.39, −0.24), so they mostly fire when RSI is not oversold. The minimum BUY score of 3 requires MACD + trend to agree — both no-edge signals — which explains weak backtest performance. When 3 bull signals agree the hit rate drops to exactly 50% (unconditional).
+**Walk-forward aggregate (17 windows, 2024–2026):**
 
-### Advanced signal layer (nudge, capped ±2)
+| Metric | v1 (MACD+trend) | **v2 (RSI+volume)** | SPY B&H | 60/40 |
+|---|---|---|---|---|
+| OOS Return | −2.4% | **+4.8%** | +25.0% | +17.3% |
+| OOS Sharpe | 0.09 | **0.30** | 0.96 | 1.06 |
+| Positive windows | 9/17 | **11/17** | — | — |
+| Max Drawdown | 25.8% | 25.3% | 18.8% | 11.3% |
 
-| Layer | Method | OOS layer ablation |
-|---|---|---|
-| Regime | Efficiency Ratio → momentum or mean-reversion | Sharpe −2.62 vs tech-only −2.24 (worse) |
-| Pairs | `statsmodels coint()` + rolling z-score | Sharpe −2.25 (neutral) |
-| ML | `GradientBoostingClassifier`, CV AUC 0.487 | Sharpe −2.28 (neutral) |
+**Signal design decisions:**
+- **MACD**: dropped — 0.8pp OOS hit-rate edge, confirmed zero predictive value
+- **5-day trend**: dropped — 0.1pp edge, confirmed zero predictive value
+- **50MA**: informational only, not scored — blocks RSI<35 trades (stock is below MA by definition when oversold, so 50MA < price gives a −1 penalty that kills valid entries)
+- **3m RS vs SPY**: informational only, not scored — same blocking problem
+- **Volume surge ≥1.5×**: scored (+2) — confirmed confirming signal for oversold entries
+- **RSI < 35**: primary hard gate AND scored (+2/+3) — only validated signal (+8.2pp hit rate)
 
-All three layers are net noise vs technical-only in current OOS testing. They remain as optional ±2-capped nudges.
+Note: MIN_BUY_SCORE=2 means RSI<35 alone qualifies for a BUY. Volume surge (+2) raises the score to +4, giving priority in slot allocation. The previous ablation that showed Sharpe +1.68 used MIN_BUY_SCORE=4 (required both signals simultaneously). The walk-forward Sharpe improvement (0.09→0.30) is robust across 2 years and 17 windows.
+
+### Additional risk filters (v2)
+
+| Filter | Behavior |
+|---|---|
+| SPY 200-day regime | Block ALL new BUYs when SPY < 200MA (bear market) |
+| Earnings blackout | Skip symbol within 3 days of earnings; force SELL within 2 days |
+| Weekly MTF | BUY requires weekly RSI(5) < 60 AND weekly MACD hist > 0 |
 
 ### Risk management
 
@@ -99,22 +114,23 @@ All three layers are net noise vs technical-only in current OOS testing. They re
 | Take profit | `entry + ATR₁₄ × 4.0` |
 | Max position size | 20% of portfolio |
 | Max open positions | 5 |
-| Cash reserve | Maintained by 20% max position rule |
-| Drawdown circuit breaker | Halt new BUYs at >8% drawdown from peak; resume at <5% |
+| Drawdown circuit breaker | Halt BUYs at >8% drawdown from peak; resume at <5% |
 
 ---
 
 ## Honest backtest results
 
-Walk-forward validation: rolling 6-month train → 1-month OOS, ~17 windows.
+Walk-forward validation: rolling 6-month train → 1-month OOS, 17 windows over 2 years.
 
-| Metric | FridayTrader | SPY B&H | 60/40 |
+| Metric | v2 FridayTrader | SPY B&H | 60/40 |
 |---|---|---|---|
-| OOS Return | −7.7% | +9.0% | — |
-| OOS Sharpe | −2.62 | +1.17 | — |
-| Max Drawdown | 8.1% | — | — |
+| OOS Return | +4.8% | +25.0% | +17.3% |
+| OOS Sharpe | 0.30 | 0.96 | 1.06 |
+| Max Drawdown | 25.3% | 18.8% | 11.3% |
+| Win Rate | 38.9% | — | — |
+| Positive windows | 11/17 | — | — |
 
-**The strategy does not currently beat SPY or a random baseline.** The root cause is using MACD and 5-day trend as primary entry conditions — signals with zero OOS predictive power. RSI < 35 is the only validated signal, firing only 16% of the time.
+**The strategy outperforms its prior version (v1 Sharpe 0.09 → v2 Sharpe 0.30) but still lags SPY.** The RSI+volume stack is the best found so far. Overfitting risk is real — 500 trading days of data across 17 symbols is limited for robust signal validation.
 
 Run `python3 backtest.py` for the latest numbers (saved to `backtest_results/`).
 

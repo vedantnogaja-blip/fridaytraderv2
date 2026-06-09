@@ -38,5 +38,6 @@ RS3M_BULL_THRESH  =  5.0  # % outperformance vs SPY over 3 months → bullish
 RS3M_BEAR_THRESH  = -5.0  # % underperformance → bearish
 
 # Buy/sell score gates (used in both live trader and backtest)
-MIN_BUY_SCORE  = 4   # RSI<35(+2) + one confirming signal required
+# RSI<35(+2) alone meets this threshold; volume surge(+2) makes it +4 (high confidence)
+MIN_BUY_SCORE  = 2
 MAX_SELL_SCORE = -3

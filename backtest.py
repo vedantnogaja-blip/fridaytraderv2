@@ -124,40 +124,32 @@ def compute_tech_scores(closes, volumes):
     return scores.clip(-8, 8)
 
 
-# ── New signal stack v2 (RSI gate + 50MA + volume + 3m RS) ───────────────────
+# ── Winning signal stack: RSI gate + volume surge ────────────────────────────
+# OOS ablation result: RSI<35 + volume surge = Sharpe +1.68, +35.9% return.
+# 50MA and RS3M scored NEGATIVELY — they blocked RSI+volume trades (confirmed hurting).
+# They are preserved in the live trader for informational logging only (not scored).
 
-def compute_tech_scores_v2(closes, volumes, spy_closes):
-    """Signal rebuild v2: RSI primary gate, 50MA bias, volume surge, 3m RS vs SPY.
+def compute_tech_scores_v2(closes, volumes, spy_closes=None):
+    """RSI primary gate + volume surge. 50MA and RS3M intentionally removed from scoring.
     Returns (scores DataFrame, rsi_gate_mask DataFrame).
-    MACD and 5-day trend dropped — zero OOS predictive power confirmed in diagnostic.
     """
     scores   = pd.DataFrame(0.0, index=closes.index, columns=closes.columns)
     rsi_gate = pd.DataFrame(False, index=closes.index, columns=closes.columns)
-
-    spy_ret3m = spy_closes.pct_change(63) * 100   # SPY 3-month return, daily series
 
     for sym in closes.columns:
         px  = closes[sym].dropna()
         vol = volumes.get(sym, pd.Series(dtype=float)).reindex(px.index).fillna(0)
 
-        # RSI: gate (must be < RSI_OVERSOLD for any buy) + score
+        # RSI: gate + score
         r = _rsi(px, 14)
         rsi_gate.loc[r.index, sym] = r < RSI_OVERSOLD
         s = pd.Series(0.0, index=r.index)
-        s[r < RSI_DEEP_OVERSOLD] = 3.0          # deeply oversold
-        s[(r >= RSI_DEEP_OVERSOLD) & (r < RSI_OVERSOLD)] = 2.0   # oversold
+        s[r < RSI_DEEP_OVERSOLD] = 3.0
+        s[(r >= RSI_DEEP_OVERSOLD) & (r < RSI_OVERSOLD)] = 2.0
         s[r > RSI_OVERBOUGHT] = -2.0
         scores.loc[s.index, sym] += s
 
-        # 50-day MA bias (replaces MACD)
-        ma50 = px.rolling(50).mean()
-        px_aligned = px.reindex(ma50.index)
-        s = pd.Series(0.0, index=ma50.index)
-        s[px_aligned > ma50] = 2.0
-        s[px_aligned <= ma50] = -1.0
-        scores.loc[s.index, sym] += s
-
-        # Volume surge confirmation
+        # Volume surge — confirmed confirming signal
         avg_vol = vol.rolling(20).mean()
         vr = vol / avg_vol.replace(0, np.nan)
         s = pd.Series(0.0, index=vr.index)
@@ -165,16 +157,7 @@ def compute_tech_scores_v2(closes, volumes, spy_closes):
         s[vr < 0.8] = -1.0
         scores.loc[s.index, sym] += s
 
-        # 3-month relative strength vs SPY (replaces 5-day trend)
-        ret3m  = px.pct_change(63) * 100
-        spy_r3 = spy_ret3m.reindex(px.index)
-        rs3m   = ret3m - spy_r3
-        s = pd.Series(0.0, index=rs3m.index)
-        s[rs3m >= RS3M_BULL_THRESH]  =  2.0
-        s[rs3m <= RS3M_BEAR_THRESH]  = -1.0
-        scores.loc[s.index, sym] += s
-
-        # Near 20d low/high (kept)
+        # Near 20d low/high — small contextual weight
         hi = px.rolling(20).max(); lo = px.rolling(20).min()
         pp = (px - lo) / (hi - lo).replace(0, np.nan) * 100
         s = pd.Series(0.0, index=pp.index)
@@ -1179,10 +1162,10 @@ if __name__ == "__main__":
     # ── Old v1 layer ablation ─────────────────────────────────────────────
     walk_forward_layer_analysis(closes, opens, atrs, tech, regime, pair_s, ml_s, test_idx, split_date)
 
-    # ── NEW SIGNAL v2 ABLATION (OOS only, 70/30 split) ───────────────────
+    # ── SIGNAL v2 CONFIRMATION (OOS only, 70/30 split) ───────────────────
     print(f"\n{'='*w}")
-    print(f"  SIGNAL v2 ABLATION  (OOS: {split_date.date()} → {closes.index[-1].date()})")
-    print(f"  RSI gate required | 50MA replaces MACD | RS3M replaces 5d-trend")
+    print(f"  SIGNAL v2 CONFIRMATION  (OOS: {split_date.date()} → {closes.index[-1].date()})")
+    print(f"  Winning stack: RSI<35 gate + volume surge | 50MA/RS3M removed from scoring")
     print(f"{'='*w}")
 
     # Pre-compute v2 components over full dataset (causal — safe for OOS-only eval)

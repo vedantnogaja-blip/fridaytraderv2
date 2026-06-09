@@ -835,14 +835,15 @@ async function loadSignals() {
       '<thead><tr>' +
       '<th>Symbol</th>' +
       '<th>Price</th>' +
-      '<th title="RSI PRIMARY GATE — only validated signal (+8.2pp OOS edge). BUY requires RSI&lt;35.">RSI ✓gate</th>' +
-      '<th title="50-day moving average — replaces MACD (zero OOS edge)">vs 50MA</th>' +
-      '<th title="3-month relative strength vs SPY — replaces 5d trend (zero OOS edge)">3m RS</th>' +
-      '<th title="Weekly RSI(5) / MACD — multi-timeframe confirmation">Weekly</th>' +
-      '<th title="Days to next earnings report">Earnings</th>' +
-      '<th>Score</th>' +
-      '<th>Adv</th>' +
-      '<th>Blended</th>' +
+      '<th title="RSI PRIMARY GATE — only validated signal (+8.2pp OOS edge). BUY requires RSI&lt;35. Score: &lt;25=+3, &lt;35=+2, &gt;70=−2.">RSI ✓gate</th>' +
+      '<th title="Volume vs 20d avg — confirmed confirming signal. Score: ≥1.5x=+2, &lt;0.8x=−1.">Volume</th>' +
+      '<th title="50-day MA — INFORMATIONAL ONLY. Not scored: blocks RSI+volume trades (stock below MA when oversold).">vs 50MA ℹ</th>' +
+      '<th title="3m relative strength vs SPY — INFORMATIONAL ONLY. Not scored: same blocking problem.">3m RS ℹ</th>' +
+      '<th title="Weekly RSI(5) / MACD — multi-timeframe BUY gate (must be bullish to allow BUY)">Weekly</th>' +
+      '<th title="Days to next earnings report (≤3d: skip; ≤2d: force sell)">Earnings</th>' +
+      '<th title="Tech score (RSI + volume + price position)">Score</th>' +
+      '<th title="Advanced layer contribution (regime/pairs/ML, capped ±2)">Adv</th>' +
+      '<th title="Blended score = tech + adv. BUY threshold: ≥2">Blended</th>' +
       '</tr></thead>' +
       '<tbody id="sigTableBody"></tbody>' +
       '</table></div>';
@@ -888,12 +889,23 @@ async function loadSignals() {
       const blended = s.blended_score != null ? s.blended_score : '—';
       const blendedClass = s.blended_score != null ? (s.blended_score >= 4 ? 'blended-pos' : (s.blended_score <= -3 ? 'blended-neg' : '')) : '';
       const price = s.price != null ? '$'+s.price.toFixed(2) : '—';
+      // Volume display
+      let volDisp = '—';
+      if (s.volume_ratio != null) {
+        const vc = s.volume_ratio >= 1.5 ? '#10b981' : (s.volume_ratio < 0.8 ? '#ef4444' : 'var(--text2)');
+        const vs = s.volume_ratio >= 1.5 ? ' ⚡' : '';
+        volDisp = `<span style="color:${vc}">${s.volume_ratio != null ? s.volume_ratio.toFixed(2)+'x'+vs : '—'}</span>`;
+      } else if (s.rsi != null) {
+        volDisp = '—';
+      }
+
       return '<tr>' +
         '<td><strong>'+s.sym+'</strong></td>' +
         '<td>'+price+'</td>' +
         '<td>'+rsiDisplay+'</td>' +
-        '<td>'+ma50Disp+'</td>' +
-        '<td>'+rs3mDisp+'</td>' +
+        '<td>'+volDisp+'</td>' +
+        '<td style="color:var(--text3);font-size:12px">'+ma50Disp+'</td>' +
+        '<td style="color:var(--text3);font-size:12px">'+rs3mDisp+'</td>' +
         '<td>'+weeklyDisp+'</td>' +
         '<td>'+earningsDisp+'</td>' +
         '<td>'+score+'</td>' +
