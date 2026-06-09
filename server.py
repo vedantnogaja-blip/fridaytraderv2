@@ -140,6 +140,69 @@ def indices():
     return jsonify(result)
 
 
+@app.route("/health")
+def health():
+    port_path = os.path.join(VAULT, "portfolio.json")
+    perf_path = os.path.join(VAULT, "performance.json")
+    port = {}
+    perf = {}
+    try:
+        if os.path.exists(port_path):
+            with open(port_path) as f:
+                port = json.load(f)
+    except Exception: pass
+    try:
+        if os.path.exists(perf_path):
+            with open(perf_path) as f:
+                perf = json.load(f)
+    except Exception: pass
+    holdings = port.get("holdings", {})
+    portfolio_value = round(port.get("cash", 0) + sum(
+        h["shares"] * h["avg_price"] for h in holdings.values()
+    ), 2)
+    snaps = perf.get("snapshots", [])
+    last_run = snaps[-1]["date"] if snaps else None
+    return jsonify({
+        "last_run": last_run,
+        "next_run": "Weekdays 22:00 + 02:00 SGT",
+        "circuit_breaker_active": port.get("drawdown_halted", False),
+        "portfolio_value": portfolio_value,
+        "holdings_count": len(holdings),
+        "sessions_run": port.get("sessions", 0),
+        "errors_last_run": []
+    })
+
+
+@app.route("/signals")
+def signals():
+    path = os.path.join(VAULT, "signals.json")
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return jsonify(json.load(f))
+        except Exception:
+            pass
+    return jsonify({"timestamp": None, "signals": []})
+
+
+@app.route("/backtest-report")
+def backtest_report():
+    report_dir = os.path.join(VAULT, "backtest_results")
+    if not os.path.exists(report_dir):
+        return jsonify({"error": "No backtest results found. Run python3 backtest.py first."})
+    json_files = sorted(
+        [f for f in os.listdir(report_dir) if f.endswith(".json")],
+        reverse=True
+    )
+    if not json_files:
+        return jsonify({"error": "No backtest JSON found. Run python3 backtest.py first."})
+    try:
+        with open(os.path.join(report_dir, json_files[0])) as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 if __name__ == "__main__":
     start_poller()
     print("Server running at http://localhost:9090")

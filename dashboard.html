@@ -146,6 +146,56 @@
   .wl-held { font-size:11px; color:var(--text3); margin-top:4px; }
   .wl-cat-body { overflow:hidden; transition:max-height .3s ease; }
 
+  /* SIGNAL DEBUG TAB */
+  .signal-banner{background:#fef9c3;border:1px solid #fbbf24;border-radius:var(--r2);padding:10px 14px;font-size:12.5px;color:#92400e;}
+  .sig-table{width:100%;border-collapse:collapse;}
+  .sig-table th{text-align:right;padding:8px 12px;font-size:11px;font-weight:600;color:var(--text3);border-bottom:1px solid var(--border);white-space:nowrap;}
+  .sig-table th:first-child{text-align:left;}
+  .sig-table td{padding:9px 12px;font-size:12.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border-light);}
+  .sig-table td:first-child{text-align:left;font-family:var(--font);font-weight:600;}
+  .sig-table tr:last-child td{border-bottom:none;}
+  .sig-table tr:hover td{background:var(--surface2);}
+  .rsi-green{color:var(--green);font-weight:700;}
+  .rsi-orange{color:var(--amber);font-weight:700;}
+  .no-edge{color:var(--text3);font-size:11px;cursor:help;}
+  .blended-pos{color:var(--green);font-weight:700;}
+  .blended-neg{color:var(--red);font-weight:700;}
+  .sig-updated{font-size:11.5px;color:var(--text3);margin-top:10px;padding:0 20px 12px;font-family:var(--mono);}
+
+  /* BACKTEST TAB */
+  .bt-chart-wrap{position:relative;height:300px;}
+  .wf-table{width:100%;border-collapse:collapse;}
+  .wf-table th{text-align:right;padding:8px 12px;font-size:11px;font-weight:600;color:var(--text3);border-bottom:1px solid var(--border);}
+  .wf-table th:first-child,.wf-table th:nth-child(2){text-align:left;}
+  .wf-table td{padding:9px 12px;font-size:12.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border-light);}
+  .wf-table td:first-child,.wf-table td:nth-child(2){text-align:left;font-family:var(--font);}
+  .wf-table tr:last-child td{border-bottom:none;}
+  .wf-row-good td{background:rgba(236,253,245,0.6);}
+  .wf-row-bad td{background:rgba(254,242,242,0.6);}
+
+  /* RISK TAB */
+  .cb-card{border-radius:var(--r);padding:18px 20px;}
+  .cb-card.active{background:#fef2f2;border:1.5px solid #fca5a5;}
+  .cb-card.clear{background:#ecfdf5;border:1.5px solid #6ee7b7;}
+  .cb-title{font-size:15px;font-weight:700;margin-bottom:4px;}
+  .cb-card.active .cb-title{color:#dc2626;}
+  .cb-card.clear .cb-title{color:#059669;}
+  .cb-meta{font-size:12.5px;color:var(--text2);margin-top:12px;display:flex;gap:24px;flex-wrap:wrap;}
+  .cb-meta-item{display:flex;flex-direction:column;gap:2px;}
+  .cb-meta-label{font-size:11px;color:var(--text3);}
+  .cb-meta-value{font-size:14px;font-weight:600;font-family:var(--mono);}
+  .risk-table{width:100%;border-collapse:collapse;}
+  .risk-table th{text-align:right;padding:8px 12px;font-size:11px;font-weight:600;color:var(--text3);border-bottom:1px solid var(--border);}
+  .risk-table th:first-child{text-align:left;}
+  .risk-table td{padding:9px 12px;font-size:12.5px;font-family:var(--mono);text-align:right;border-bottom:1px solid var(--border-light);}
+  .risk-table td:first-child{text-align:left;font-family:var(--font);font-weight:600;}
+  .risk-table tr:last-child td{border-bottom:none;}
+  .risk-table tr:hover td{background:var(--surface2);}
+  .atr-stop{color:var(--red);}
+  .atr-target{color:var(--green);}
+  .atr-legacy{color:var(--text3);font-size:11px;font-family:var(--font);}
+  .risk-pie-wrap{position:relative;height:260px;}
+
 </style>
 </head>
 <body>
@@ -170,6 +220,9 @@
     <button class="tab active" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="tab" onclick="switchTab('performance')">Performance</button>
     <button class="tab" onclick="switchTab('market')">Live Market</button>
+    <button class="tab" onclick="switchTab('signals')">Signal Debug</button>
+    <button class="tab" onclick="switchTab('backtest')">Backtest</button>
+    <button class="tab" onclick="switchTab('risk')">Risk</button>
     <button class="tab" onclick="switchTab('skills')">Skills</button>
   </div>
 
@@ -320,6 +373,106 @@
       </div>
     </div>
   </div>
+  <!-- ═══ SIGNAL DEBUG TAB ═══ -->
+  <div id="tab-signals" class="tab-panel">
+    <div>
+      <div class="hero-label">Signal Debug</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-1px;margin-bottom:8px">Raw Signal Table</div>
+      <div style="font-size:14px;color:var(--text3)">Per-symbol indicators from the last trader run</div>
+    </div>
+    <div class="signal-banner">⚠ Diagnostic finding: Only RSI&lt;35 has statistically validated predictive power (+8.2pp). MACD and 5-day trend signals showed no edge in OOS testing.</div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Signal Snapshot</div>
+        <div class="card-meta" id="signalsTimestamp">—</div>
+      </div>
+      <div class="card-body tight">
+        <div id="signalsContent"><div class="empty">Loading...</div></div>
+        <div class="sig-updated" id="signalsUpdatedLine" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ BACKTEST TAB ═══ -->
+  <div id="tab-backtest" class="tab-panel">
+    <div>
+      <div class="hero-label">Backtest Analysis</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-1px;margin-bottom:8px">Walk-Forward Results</div>
+      <div style="font-size:14px;color:var(--text3)">Out-of-sample performance across rolling windows</div>
+    </div>
+    <div id="btContentArea">
+      <div class="stats-strip">
+        <div class="stat-card"><div class="stat-label">OOS Sharpe</div><div class="stat-value" id="btSharpe">—</div><div class="stat-sub">out-of-sample</div></div>
+        <div class="stat-card"><div class="stat-label">OOS Return</div><div class="stat-value" id="btReturn">—</div><div class="stat-sub">annualized</div></div>
+        <div class="stat-card"><div class="stat-label">Max Drawdown</div><div class="stat-value red" id="btMaxDD">—</div><div class="stat-sub">worst period</div></div>
+        <div class="stat-card"><div class="stat-label">vs SPY Alpha</div><div class="stat-value" id="btAlpha">—</div><div class="stat-sub">excess return</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Walk-Forward Equity Curve</div>
+          <div class="card-meta">
+            <div class="legend">
+              <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Strategy</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#3b82f6;opacity:0.7"></div>SPY</div>
+              <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;opacity:0.7"></div>60/40</div>
+            </div>
+          </div>
+        </div>
+        <div class="card-body"><div class="bt-chart-wrap"><canvas id="btEquityChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Walk-Forward Windows</div><div class="card-meta">Rolling test periods</div></div>
+        <div class="card-body tight"><div id="btWindowsTable"><div class="empty">Loading...</div></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><div class="card-title">Benchmark Comparison</div><div class="card-meta">Strategy vs peers</div></div>
+          <div class="card-body tight"><div id="btBenchmarks"><div class="empty">Loading...</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Signal Quality</div><div class="card-meta">OOS hit rates</div></div>
+          <div class="card-body"><div id="btSignalQuality"><div class="empty">Loading...</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div id="btErrorState" class="card" style="display:none">
+      <div class="card-body"><div class="empty" id="btErrorMsg">No backtest results yet. Run: <code style="font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px">python3 backtest.py</code></div></div>
+    </div>
+  </div>
+
+  <!-- ═══ RISK TAB ═══ -->
+  <div id="tab-risk" class="tab-panel">
+    <div>
+      <div class="hero-label">Risk Management</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-1px;margin-bottom:8px">Portfolio Risk</div>
+      <div style="font-size:14px;color:var(--text3)">Circuit breaker, drawdown, and per-position ATR metrics</div>
+    </div>
+    <div id="riskCircuitBreaker" class="cb-card clear">
+      <div class="cb-title">✓ Circuit Breaker Clear — System operating normally.</div>
+      <div class="cb-meta" id="riskCBMeta"></div>
+    </div>
+    <div class="stats-strip">
+      <div class="stat-card"><div class="stat-label">Current Drawdown</div><div class="stat-value green" id="riskCurDD">—</div><div class="stat-sub">from peak</div></div>
+      <div class="stat-card"><div class="stat-label">Max Drawdown</div><div class="stat-value red" id="riskMaxDD">—</div><div class="stat-sub">all-time</div></div>
+      <div class="stat-card"><div class="stat-label">Rolling Sharpe</div><div class="stat-value" id="riskSharpe">—</div><div class="stat-sub">30 sessions</div></div>
+      <div class="stat-card"><div class="stat-label">Sessions to Recovery</div><div class="stat-value" id="riskRecovery">—</div><div class="stat-sub">at current avg PnL</div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Per-Position Risk</div><div class="card-meta">ATR-based stops and targets</div></div>
+      <div class="card-body tight"><div id="riskPositionTable"><div class="empty">Loading...</div></div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><div class="card-title">Portfolio Allocation</div><div class="card-meta">Current distribution</div></div>
+        <div class="card-body"><div class="risk-pie-wrap"><canvas id="riskPieChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Risk Summary</div><div class="card-meta">Key metrics</div></div>
+        <div class="card-body"><div id="riskSummaryContent"><div class="empty">Loading...</div></div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ SKILLS TAB ═══ -->
   <div id="tab-skills" class="tab-panel">
     <div>
@@ -341,11 +494,12 @@
 
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>
 const START=10000;
 const COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4'];
 let liveData=null, portfolioData=null, perfChart=null, marketInterval=null;
+let signalsLoaded=false, backtestLoaded=false, riskLoaded=false;
+let btEquityChartInst=null, riskPieChartInst=null;
 
 // Clock
 setInterval(()=>{
@@ -367,6 +521,9 @@ function switchTab(name) {
   }
   if(name==='performance' && portfolioData && liveData) renderPerformance(portfolioData, liveData);
   if(name==='market') { loadMarket(); if(marketInterval) clearInterval(marketInterval); marketInterval = setInterval(loadMarket, 15000); } else { if(marketInterval) { clearInterval(marketInterval); marketInterval = null; } }
+  if(name==='signals' && !signalsLoaded) loadSignals();
+  if(name==='backtest' && !backtestLoaded) loadBacktest();
+  if(name==='risk' && !riskLoaded) loadRisk();
 }
 
 // Load all data
@@ -636,6 +793,371 @@ function renderWatchlist(prices, holdings) {
       '<div style="display:flex;align-items:center;gap:8px"><span class="wl-cat-badge">'+syms.length+' stocks</span><span style="color:var(--text3);font-size:14px">'+(open?'▼':'▶')+'</span></div>' +
       '</div>' +
       '<div class="wl-cat-body" style="max-height:'+(open?'500px':'0')+'"><div class="wl-grid">'+cards+'</div></div>';
+  }
+}
+
+// ── Signal Debug Tab ──────────────────────────────────────────────────────────
+async function loadSignals() {
+  try {
+    const res = await fetch('/signals?'+Date.now());
+    const data = await res.json();
+    signalsLoaded = true;
+    const ts = data.timestamp;
+    document.getElementById('signalsTimestamp').textContent = ts ? 'Updated '+ts : 'No data yet';
+    const signals = data.signals || [];
+    const el = document.getElementById('signalsContent');
+    const updLine = document.getElementById('signalsUpdatedLine');
+    if (!ts || !signals.length) {
+      el.innerHTML = '<div class="empty">No signal data yet. Run the trader to populate this table.</div>';
+      updLine.style.display = 'none';
+      return;
+    }
+    el.innerHTML = '<div style="overflow-x:auto"><table class="sig-table">' +
+      '<thead><tr>' +
+      '<th>Symbol</th>' +
+      '<th>Price</th>' +
+      '<th title="RSI&lt;35: proven +8.2pp edge">RSI</th>' +
+      '<th>MACD Hist <span class="no-edge" title="No predictive edge in OOS testing">⚠ no edge</span></th>' +
+      '<th>Tech Score <span class="no-edge" title="5-day trend showed no edge in OOS testing">⚠ no edge</span></th>' +
+      '<th>Regime</th>' +
+      '<th>ML Prob</th>' +
+      '<th>Pairs</th>' +
+      '<th>Blended Score</th>' +
+      '<th>Adv Contrib</th>' +
+      '</tr></thead>' +
+      '<tbody id="sigTableBody"></tbody>' +
+      '</table></div>';
+    document.getElementById('sigTableBody').innerHTML = signals.map(function(s) {
+      const rsiVal = s.rsi != null ? s.rsi.toFixed(1) : '—';
+      const rsiClass = s.rsi != null ? (s.rsi < 35 ? 'rsi-green' : s.rsi > 70 ? 'rsi-orange' : '') : '';
+      const macd = s.macd_hist != null ? s.macd_hist.toFixed(3) : '—';
+      const techScore = s.tech_score != null ? s.tech_score : '—';
+      const regime = s.regime || '—';
+      const mlProb = s.ml_prob != null ? (s.ml_prob*100).toFixed(1)+'%' : '—';
+      const pairs = s.pairs != null ? s.pairs.toFixed(3) : '—';
+      const blended = s.blended_score != null ? s.blended_score.toFixed(2) : '—';
+      const blendedClass = s.blended_score != null ? (s.blended_score > 2 ? 'blended-pos' : s.blended_score < -2 ? 'blended-neg' : '') : '';
+      const advContrib = s.adv_contrib != null ? s.adv_contrib.toFixed(3) : '—';
+      const price = s.price != null ? '$'+s.price.toFixed(2) : '—';
+      return '<tr>' +
+        '<td>'+s.symbol+'</td>' +
+        '<td>'+price+'</td>' +
+        '<td class="'+rsiClass+'">'+rsiVal+'</td>' +
+        '<td>'+macd+'</td>' +
+        '<td>'+techScore+'</td>' +
+        '<td>'+regime+'</td>' +
+        '<td>'+mlProb+'</td>' +
+        '<td>'+pairs+'</td>' +
+        '<td class="'+blendedClass+'">'+blended+'</td>' +
+        '<td>'+advContrib+'</td>' +
+        '</tr>';
+    }).join('');
+    updLine.style.display = '';
+    updLine.textContent = 'Last updated: '+ts;
+  } catch(e) {
+    signalsLoaded = false;
+    document.getElementById('signalsContent').innerHTML = '<div class="empty">Error loading signals: '+e.message+'</div>';
+  }
+}
+
+// ── Backtest Tab ──────────────────────────────────────────────────────────────
+async function loadBacktest() {
+  try {
+    const res = await fetch('/backtest-report?'+Date.now());
+    const data = await res.json();
+    backtestLoaded = true;
+
+    if (data.error) {
+      document.getElementById('btContentArea').style.display = 'none';
+      const errEl = document.getElementById('btErrorState');
+      errEl.style.display = '';
+      document.getElementById('btErrorMsg').innerHTML = data.error + ' &nbsp;<code style="font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px">python3 backtest.py</code>';
+      return;
+    }
+
+    document.getElementById('btContentArea').style.display = '';
+    document.getElementById('btErrorState').style.display = 'none';
+
+    // Summary strip
+    const btSharpeEl = document.getElementById('btSharpe');
+    btSharpeEl.textContent = data.oos_sharpe != null ? data.oos_sharpe.toFixed(2) : '—';
+    btSharpeEl.className = 'stat-value '+(data.oos_sharpe > 0.5 ? 'green' : data.oos_sharpe < 0 ? 'red' : '');
+
+    const btReturnEl = document.getElementById('btReturn');
+    const retPct = data.oos_return != null ? (data.oos_return*100).toFixed(1)+'%' : '—';
+    btReturnEl.textContent = retPct;
+    btReturnEl.className = 'stat-value '+(data.oos_return > 0 ? 'green' : data.oos_return < 0 ? 'red' : '');
+
+    document.getElementById('btMaxDD').textContent = data.max_drawdown != null ? (data.max_drawdown*100).toFixed(1)+'%' : '—';
+
+    const btAlphaEl = document.getElementById('btAlpha');
+    btAlphaEl.textContent = data.alpha_vs_spy != null ? (data.alpha_vs_spy >= 0 ? '+' : '')+(data.alpha_vs_spy*100).toFixed(1)+'%' : '—';
+    btAlphaEl.className = 'stat-value '+(data.alpha_vs_spy > 0 ? 'green' : data.alpha_vs_spy < 0 ? 'red' : '');
+
+    // Equity curve chart
+    const ec = data.equity_curve || [];
+    if (ec.length) {
+      const ctx = document.getElementById('btEquityChart').getContext('2d');
+      if (btEquityChartInst) btEquityChartInst.destroy();
+      btEquityChartInst = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: ec.map(function(e){ return e.date; }),
+          datasets: [
+            {label:'Strategy', data:ec.map(function(e){return e.strategy;}), borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.07)', borderWidth:2.5, pointRadius:0, fill:true, tension:0.3},
+            {label:'SPY',      data:ec.map(function(e){return e.spy;}),      borderColor:'#3b82f6', backgroundColor:'transparent', borderWidth:1.8, pointRadius:0, fill:false, tension:0.3, borderDash:[5,4]},
+            {label:'60/40',    data:ec.map(function(e){return e.balanced;}), borderColor:'#f59e0b', backgroundColor:'transparent', borderWidth:1.8, pointRadius:0, fill:false, tension:0.3, borderDash:[5,4]}
+          ]
+        },
+        options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+          plugins:{legend:{display:false},tooltip:{backgroundColor:'#fff',titleColor:'#111827',bodyColor:'#6b7280',borderColor:'#e5e7eb',borderWidth:1,padding:12}},
+          scales:{x:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:10},maxTicksLimit:12}},y:{grid:{color:'#f0f1f3'},ticks:{color:'#9ca3af',font:{size:11}}}}}
+      });
+    }
+
+    // Walk-forward windows table
+    const wfWindows = data.walk_forward_windows || [];
+    const wfEl = document.getElementById('btWindowsTable');
+    if (wfWindows.length) {
+      wfEl.innerHTML = '<div style="overflow-x:auto"><table class="wf-table"><thead><tr>' +
+        '<th>Window</th><th>Test Period</th><th>Return</th><th>Sharpe</th><th>Max DD</th><th>Win Rate</th><th>Trades</th>' +
+        '</tr></thead><tbody>' +
+        wfWindows.map(function(w, i) {
+          const rowClass = w.sharpe > 0.5 ? 'wf-row-good' : w.sharpe < 0 ? 'wf-row-bad' : '';
+          return '<tr class="'+rowClass+'">' +
+            '<td>'+(w.window||i+1)+'</td>' +
+            '<td>'+(w.test_period||'—')+'</td>' +
+            '<td style="color:'+(w.return >= 0 ? 'var(--green)' : 'var(--red)')+'">'+
+              (w.return != null ? (w.return >= 0 ? '+' : '')+(w.return*100).toFixed(1)+'%' : '—')+'</td>' +
+            '<td style="color:'+(w.sharpe > 0.5 ? 'var(--green)' : w.sharpe < 0 ? 'var(--red)' : 'inherit')+'">'+
+              (w.sharpe != null ? w.sharpe.toFixed(2) : '—')+'</td>' +
+            '<td style="color:var(--red)">'+(w.max_dd != null ? (w.max_dd*100).toFixed(1)+'%' : '—')+'</td>' +
+            '<td>'+(w.win_rate != null ? (w.win_rate*100).toFixed(1)+'%' : '—')+'</td>' +
+            '<td>'+(w.trades != null ? w.trades : '—')+'</td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+    } else {
+      wfEl.innerHTML = '<div class="empty">No walk-forward window data</div>';
+    }
+
+    // Benchmarks comparison
+    const bm = data.benchmarks || {};
+    const bmKeys = Object.keys(bm);
+    const bmEl = document.getElementById('btBenchmarks');
+    if (bmKeys.length) {
+      bmEl.innerHTML = '<div style="overflow-x:auto"><table class="wf-table"><thead><tr>' +
+        '<th>Benchmark</th><th>Return</th><th>Sharpe</th><th>Max DD</th>' +
+        '</tr></thead><tbody>' +
+        bmKeys.map(function(k) {
+          const v = bm[k];
+          return '<tr>' +
+            '<td style="font-family:var(--font);font-weight:600">'+k.replace(/_/g,' ')+'</td>' +
+            '<td style="color:'+(v.return >= 0 ? 'var(--green)' : 'var(--red)')+'">'+
+              (v.return != null ? (v.return >= 0 ? '+' : '')+(v.return*100).toFixed(1)+'%' : '—')+'</td>' +
+            '<td style="color:'+(v.sharpe > 0.5 ? 'var(--green)' : v.sharpe < 0 ? 'var(--red)' : 'inherit')+'">'+
+              (v.sharpe != null ? v.sharpe.toFixed(2) : '—')+'</td>' +
+            '<td style="color:var(--red)">'+(v.max_dd != null ? (v.max_dd*100).toFixed(1)+'%' : '—')+'</td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+    } else {
+      bmEl.innerHTML = '<div class="empty">No benchmark data</div>';
+    }
+
+    // Signal quality
+    const sq = data.signal_quality || [];
+    const sqEl = document.getElementById('btSignalQuality');
+    const sqNote = '<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Only RSI&lt;35 shows a statistically meaningful edge.</div>';
+    if (sq.length) {
+      sqEl.innerHTML = sqNote + '<div style="display:flex;flex-direction:column;gap:12px">' +
+        sq.map(function(s) {
+          const hitPct = (s.hit_rate*100).toFixed(1);
+          const edgePp = ((s.hit_rate - s.baseline)*100);
+          const edgeStr = (edgePp >= 0 ? '+' : '') + edgePp.toFixed(1) + 'pp vs baseline';
+          const hasEdge = Math.abs(edgePp) > 5;
+          return '<div>' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:5px">' +
+            '<span style="font-size:12.5px;font-weight:600">'+s.signal+'</span>' +
+            '<span style="font-size:12px;font-family:var(--mono);color:'+(hasEdge?'var(--green)':'var(--text3)')+'">'+hitPct+'% ('+edgeStr+')</span>' +
+            '</div>' +
+            '<div style="height:6px;background:var(--surface2);border-radius:99px;overflow:hidden">' +
+            '<div style="height:100%;width:'+Math.min(s.hit_rate*100*1.8,100)+'%;background:'+(hasEdge?'var(--green)':'var(--text3)')+';border-radius:99px"></div>' +
+            '</div></div>';
+        }).join('') + '</div>';
+    } else {
+      sqEl.innerHTML = sqNote + '<div class="empty">No signal quality data</div>';
+    }
+  } catch(e) {
+    backtestLoaded = false;
+    document.getElementById('btContentArea').style.display = 'none';
+    const errEl = document.getElementById('btErrorState');
+    errEl.style.display = '';
+    document.getElementById('btErrorMsg').textContent = 'Error loading backtest data: '+e.message;
+  }
+}
+
+// ── Risk Tab ──────────────────────────────────────────────────────────────────
+async function loadRisk() {
+  try {
+    const [portRes, perfRes] = await Promise.all([
+      fetch('/portfolio.json?'+Date.now()),
+      fetch('/performance.json?'+Date.now()).catch(function(){return null;})
+    ]);
+    const port = await portRes.json();
+    const perf = perfRes ? await perfRes.json() : null;
+    riskLoaded = true;
+
+    const holdings = port.holdings || {};
+    const cash = port.cash || 0;
+    const syms = Object.keys(holdings);
+    const snaps = perf ? perf.snapshots || [] : [];
+    const prices = liveData ? liveData.prices || {} : {};
+
+    // Current total value
+    let invested = 0;
+    syms.forEach(function(s) {
+      const p = prices[s] ? prices[s].price : holdings[s].avg_price;
+      invested += holdings[s].shares * p;
+    });
+    const total = cash + invested;
+
+    // Peak value and current drawdown
+    const peakFromSnaps = snaps.reduce(function(mx, s){ return s.value > mx ? s.value : mx; }, 0);
+    const peak = Math.max(peakFromSnaps, total);
+    const curDD = peak > 0 ? (total - peak) / peak * 100 : 0;
+
+    // All-time max drawdown from snapshots
+    let maxDD = 0, runPeak = snaps.length ? snaps[0].value : total;
+    snaps.forEach(function(s) {
+      if (s.value > runPeak) runPeak = s.value;
+      const dd = (s.value - runPeak) / runPeak * 100;
+      if (dd < maxDD) maxDD = dd;
+    });
+
+    // Circuit breaker card
+    const cbActive = port.drawdown_halted || false;
+    const cbEl = document.getElementById('riskCircuitBreaker');
+    cbEl.className = 'cb-card '+(cbActive ? 'active' : 'clear');
+    cbEl.querySelector('.cb-title').textContent = cbActive
+      ? '🚨 CIRCUIT BREAKER ACTIVE — New BUYs halted. Portfolio is in drawdown. Recovery required to resume.'
+      : '✓ Circuit Breaker Clear — System operating normally.';
+    document.getElementById('riskCBMeta').innerHTML =
+      '<div class="cb-meta-item"><span class="cb-meta-label">Current Value</span><span class="cb-meta-value">$'+total.toFixed(2)+'</span></div>' +
+      '<div class="cb-meta-item"><span class="cb-meta-label">Peak Value</span><span class="cb-meta-value">$'+peak.toFixed(2)+'</span></div>' +
+      '<div class="cb-meta-item"><span class="cb-meta-label">Current Drawdown</span><span class="cb-meta-value" style="color:'+(curDD < -0.01 ? 'var(--red)' : 'var(--green)')+'">'+curDD.toFixed(2)+'%</span></div>' +
+      '<div class="cb-meta-item"><span class="cb-meta-label">Threshold</span><span class="cb-meta-value">−8%</span></div>';
+
+    // Rolling risk metrics
+    const curDDEl = document.getElementById('riskCurDD');
+    curDDEl.textContent = curDD.toFixed(2)+'%';
+    curDDEl.className = 'stat-value '+(curDD < -0.01 ? 'red' : 'green');
+
+    document.getElementById('riskMaxDD').textContent = maxDD.toFixed(2)+'%';
+
+    // Rolling Sharpe (last 30 sessions)
+    const sharpeEl = document.getElementById('riskSharpe');
+    if (snaps.length >= 3) {
+      const recent = snaps.slice(-30);
+      const returns = recent.slice(1).map(function(s, i){ return (s.value - recent[i].value) / recent[i].value; });
+      const mean = returns.reduce(function(a,b){return a+b;}, 0) / returns.length;
+      const variance = returns.reduce(function(a,b){return a+(b-mean)*(b-mean);}, 0) / (returns.length - 1);
+      const std = Math.sqrt(variance);
+      const sharpe30 = std > 0 ? (mean / std * Math.sqrt(252)).toFixed(2) : '—';
+      sharpeEl.textContent = sharpe30;
+      if (sharpe30 !== '—') {
+        sharpeEl.className = 'stat-value '+(parseFloat(sharpe30) > 0.5 ? 'green' : parseFloat(sharpe30) < 0 ? 'red' : '');
+      }
+    } else {
+      sharpeEl.textContent = '—';
+    }
+
+    // Sessions to recovery
+    const recovEl = document.getElementById('riskRecovery');
+    if (curDD < -0.01 && snaps.length >= 2) {
+      const recent = snaps.slice(-10);
+      const avgDailyGain = recent.length > 1
+        ? (recent[recent.length-1].value - recent[0].value) / (recent.length - 1)
+        : 0;
+      const deficit = total * (Math.abs(curDD) / 100);
+      recovEl.textContent = avgDailyGain > 0 ? Math.ceil(deficit / avgDailyGain) : '∞';
+    } else {
+      recovEl.textContent = '—';
+    }
+
+    // Per-position risk table
+    const posEl = document.getElementById('riskPositionTable');
+    if (!syms.length) {
+      posEl.innerHTML = '<div class="empty">No open positions</div>';
+    } else {
+      posEl.innerHTML = '<div style="overflow-x:auto"><table class="risk-table"><thead><tr>' +
+        '<th>Symbol</th><th>Shares</th><th>Entry Price</th><th>ATR</th><th>ATR Stop</th><th>ATR Target</th><th>P&amp;L %</th>' +
+        '</tr></thead><tbody>' +
+        syms.map(function(s) {
+          const h = holdings[s];
+          const curPrice = prices[s] ? prices[s].price : h.avg_price;
+          const pnlPct = (curPrice - h.avg_price) / h.avg_price * 100;
+          const pnlStr = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
+          const hasATR = h.atr != null;
+          const atrCell = hasATR ? h.atr.toFixed(2) : '<span class="atr-legacy">Legacy</span>';
+          const stopCell = hasATR ? '<span class="atr-stop">$'+(h.avg_price - h.atr*2).toFixed(2)+'</span>' : '—';
+          const targetCell = hasATR ? '<span class="atr-target">$'+(h.avg_price + h.atr*4).toFixed(2)+'</span>' : '—';
+          return '<tr>' +
+            '<td>'+s+'</td>' +
+            '<td>'+h.shares+'</td>' +
+            '<td>$'+h.avg_price.toFixed(2)+'</td>' +
+            '<td>'+atrCell+'</td>' +
+            '<td>'+stopCell+'</td>' +
+            '<td>'+targetCell+'</td>' +
+            '<td style="color:'+(pnlPct >= 0 ? 'var(--green)' : 'var(--red)')+'">'+pnlStr+'</td>' +
+            '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+    }
+
+    // Portfolio allocation doughnut chart
+    const pieCtx = document.getElementById('riskPieChart').getContext('2d');
+    if (riskPieChartInst) riskPieChartInst.destroy();
+    const pieSlices = [
+      {label:'Cash', value:cash, color:'#9ca3af'},
+      ...syms.map(function(s, i) {
+        const val = holdings[s].shares * (prices[s] ? prices[s].price : holdings[s].avg_price);
+        return {label:s, value:val, color:COLORS[i % COLORS.length]};
+      })
+    ];
+    riskPieChartInst = new Chart(pieCtx, {
+      type: 'doughnut',
+      data: {
+        labels: pieSlices.map(function(d){return d.label;}),
+        datasets: [{
+          data: pieSlices.map(function(d){return d.value;}),
+          backgroundColor: pieSlices.map(function(d){return d.color;}),
+          borderWidth: 2, borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: {position:'right', labels:{font:{size:11}, boxWidth:12, padding:10}},
+          tooltip: {callbacks:{label:function(c){
+            return ' '+c.label+': $'+Number(c.parsed).toFixed(0)+' ('+(c.parsed/total*100).toFixed(1)+'%)';
+          }}}
+        }
+      }
+    });
+
+    // Risk summary card
+    document.getElementById('riskSummaryContent').innerHTML =
+      '<div style="display:flex;flex-direction:column;gap:14px">' +
+      '<div><div class="stat-label">Total Portfolio Value</div><div style="font-size:20px;font-weight:700;font-family:var(--mono)">$'+total.toFixed(2)+'</div></div>' +
+      '<div><div class="stat-label">Cash</div><div style="font-size:16px;font-weight:600;color:var(--text2)">$'+cash.toFixed(2)+' ('+( cash/total*100).toFixed(1)+'%)</div></div>' +
+      '<div><div class="stat-label">Invested</div><div style="font-size:16px;font-weight:600;color:var(--text2)">$'+invested.toFixed(2)+' ('+(invested/total*100).toFixed(1)+'%)</div></div>' +
+      '<div><div class="stat-label">Open Positions</div><div style="font-size:16px;font-weight:600">'+syms.length+'</div></div>' +
+      '<div><div class="stat-label">Sessions Run</div><div style="font-size:16px;font-weight:600">'+(port.sessions||0)+'</div></div>' +
+      '</div>';
+  } catch(e) {
+    riskLoaded = false;
+    console.error('Risk tab error:', e);
   }
 }
 

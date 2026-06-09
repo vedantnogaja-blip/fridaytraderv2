@@ -3,6 +3,7 @@ import anthropic
 import yfinance as yf
 import json
 import os
+import functools
 import schedule
 import time
 from datetime import datetime
@@ -31,6 +32,38 @@ RSI_OVERBOUGHT = 70
 
 client = anthropic.Anthropic()
 
+# ── Exponential-backoff retry decorator ───────────────────────────────────────
+def _retry(max_retries=3, delays=(2, 4, 8), reraise=False):
+    """Retry on any exception with fixed backoff. Returns None (or reraises) after exhausting retries."""
+    def decorator(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            for attempt, delay in enumerate(delays[:max_retries], 1):
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:
+                    if attempt == max_retries:
+                        print(f"  [retry] {fn.__name__} failed after {max_retries} attempts: {e}")
+                        if reraise:
+                            raise
+                        return None
+                    print(f"  [retry] {fn.__name__} attempt {attempt} failed ({e}), retrying in {delay}s...")
+                    time.sleep(delay)
+        return wrapper
+    return decorator
+
+@_retry(max_retries=3, delays=(2, 4, 8), reraise=False)
+def _fetch_history(symbol, period="60d"):
+    return yf.Ticker(symbol).history(period=period)
+
+@_retry(max_retries=3, delays=(2, 4, 8), reraise=False)
+def _fetch_sp500_history():
+    return yf.Ticker("^GSPC").history(period="5d")
+
+@_retry(max_retries=3, delays=(2, 4, 8), reraise=True)
+def _batch_download(tickers, period, **kwargs):
+    return yf.download(tickers, period=period, **kwargs)
+
 # ── Advanced signal cache (rebuilt at most once per calendar day) ─────────────
 _PRICE_CACHE = {"df": None, "date": None}
 _ADV_CACHE   = {"model": None, "pairs": None, "date": None}
@@ -40,7 +73,7 @@ def get_price_frame():
     if _PRICE_CACHE["df"] is not None and _PRICE_CACHE["date"] == today:
         return _PRICE_CACHE["df"]
     print("  [adv] Downloading 2y price history (cached daily)...")
-    raw = yf.download(WATCHLIST, period="2y", auto_adjust=True, progress=False)
+    raw = _batch_download(WATCHLIST, period="2y", auto_adjust=True, progress=False)
     df = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
     df = df.dropna(how="all")
     _PRICE_CACHE["df"] = df
@@ -77,6 +110,12 @@ def _fmt_adv_detail(symbol, adv_detail, adv_contrib=None):
                if ml else "none")
     total_str = f" | adv_total={adv_contrib:+d}" if adv_contrib is not None else ""
     return f"regime={reg_str} | ml={ml_str} | pairs={pair_str}{total_str}"
+
+def save_signals(session_signals):
+    path = os.path.join(VAULT, "signals.json")
+    with open(path, "w") as f:
+        json.dump({"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                   "signals": session_signals}, f, indent=2)
 
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
@@ -152,9 +191,8 @@ def calculate_atr(hist, period=14):
 
 def get_stock_data(symbol):
     try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period="60d")
-        if hist.empty or len(hist) < 30:
+        hist = _fetch_history(symbol, "60d")
+        if hist is None or hist.empty or len(hist) < 30:
             return None
         closes = hist["Close"].values
         volumes = hist["Volume"].values
@@ -182,12 +220,11 @@ def get_stock_data(symbol):
 
 def get_sp500_change():
     try:
-        sp = yf.Ticker("^GSPC")
-        hist = sp.history(period="5d")
-        if len(hist) >= 2:
+        hist = _fetch_sp500_history()
+        if hist is not None and len(hist) >= 2:
             change = (hist["Close"].iloc[-1] - hist["Close"].iloc[-2]) / hist["Close"].iloc[-2] * 100
             return round(float(change), 2), round(float(hist["Close"].iloc[-1]), 2)
-    except:
+    except Exception:
         pass
     return 0.0, None
 
@@ -285,11 +322,17 @@ DECISION: [BUY/SELL/HOLD]
 SHARES: [number]
 CONFIDENCE: [LOW/MEDIUM/HIGH]
 REASONING: [2 sentences]"""
-    try:
-        r = client.messages.create(model="claude-sonnet-4-6", max_tokens=200, messages=[{"role":"user","content":prompt}])
-        return r.content[0].text
-    except Exception as e:
-        return f"DECISION: HOLD\nSHARES: 0\nCONFIDENCE: LOW\nREASONING: API error {e}"
+    for attempt, delay in enumerate([2, 4, 8], 1):
+        try:
+            r = client.messages.create(model="claude-sonnet-4-6", max_tokens=200,
+                                       messages=[{"role": "user", "content": prompt}])
+            return r.content[0].text
+        except Exception as e:
+            if attempt == 3:
+                print(f"  [retry] Claude API failed after 3 attempts: {e}")
+                return f"DECISION: HOLD\nSHARES: 0\nCONFIDENCE: LOW\nREASONING: API error after retries: {e}"
+            print(f"  [retry] Claude API attempt {attempt} failed ({e}), retrying in {delay}s...")
+            time.sleep(delay)
 
 def parse_decision(response):
     decision, shares, confidence, reasoning = "HOLD", 0, "MEDIUM", ""
@@ -385,6 +428,7 @@ def run_trading_session():
     # ──────────────────────────────────────────────────────────────────────────
 
     current_prices = {}
+    session_signals = []
     for symbol in WATCHLIST:
         print(f"\n📊 Analyzing {symbol}...")
         data = get_stock_data(symbol)
@@ -407,6 +451,24 @@ def run_trading_session():
         blended_score = score + adv_contrib
         adv_line = _fmt_adv_detail(symbol, adv_detail)
         print(f"  [adv] {symbol}: tech={score:+d}, adv={adv_contrib:+d} → blended={blended_score:+d} | {adv_line}")
+
+        # Collect signal snapshot for dashboard signals.json
+        reg_d  = adv_detail.get("regime", {}).get(symbol, {})
+        ml_d   = adv_detail.get("ml", {}).get(symbol, {})
+        pair_d = adv_detail.get("pairs", {})
+        pair_str = next((f"{k}(z={v['z']:+.1f})" for k, v in pair_d.items() if symbol in k), "none")
+        session_signals.append({
+            "sym": symbol, "price": data["price"],
+            "rsi": data["rsi"], "macd_hist": data["macd_histogram"],
+            "tech_score": score,
+            "regime": reg_d.get("regime", "UNKNOWN"),
+            "regime_score": reg_d.get("score", 0),
+            "ml_prob": ml_d.get("prob_up"),
+            "ml_score": ml_d.get("score", 0),
+            "pairs": pair_str,
+            "adv_contrib": adv_contrib,
+            "blended_score": blended_score,
+        })
 
         headlines = get_headlines(symbol)
         print(f"  🧠 Asking Claude (blended score: {blended_score})...")
@@ -447,6 +509,10 @@ def run_trading_session():
     perf["snapshots"].append({"date":datetime.now().strftime("%Y-%m-%d %H:%M"),"value":round(total,2),"cash":round(portfolio["cash"],2),"pnl":round(pnl,2)})
     save_performance(perf)
     save_portfolio(portfolio)
+    try:
+        save_signals(session_signals)
+    except Exception as e:
+        print(f"  [warn] Could not save signals.json: {e}")
     total_closed = perf.get("win_trades",0) + perf.get("loss_trades",0)
     wr = perf["win_trades"]/total_closed*100 if total_closed > 0 else 0
     print(f"\n{'='*55}")

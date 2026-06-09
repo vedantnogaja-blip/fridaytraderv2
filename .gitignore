@@ -1,5 +1,36 @@
-*.log
+# Runtime state — contains live positions and API keys
+portfolio.json
+performance.json
+signals.json
+
+# Environment / secrets
+.env
+*.env
+
+# Generated backtest output
+backtest_results/
+backtest_report.html
+
+# Python
 __pycache__/
-.env
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Trained model caches
+*.pkl
+*.joblib
+*.h5
+
+# Logs
+*.log
 Agent-Logs/
-.env
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
