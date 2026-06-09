@@ -1,5 +1,5 @@
 {
-  "cash": 1766.05,
+  "cash": 1650.73,
   "holdings": {
     "AAPL": {
       "shares": 6,
@@ -9,17 +9,13 @@
       "shares": 14,
       "avg_price": 214.25
     },
-    "TSLA": {
-      "shares": 1,
-      "avg_price": 442.1
-    },
     "MSFT": {
       "shares": 5,
       "avg_price": 426.99
     },
-    "GOOGL": {
-      "shares": 2,
-      "avg_price": 390.13
+    "DCO": {
+      "shares": 8,
+      "avg_price": 148.62
     }
   },
   "trades": [
@@ -109,7 +105,49 @@
       "shares": 2,
       "price": 215.29,
       "time": "2026-05-29 23:04:11"
+    },
+    {
+      "action": "SELL",
+      "symbol": "TSLA",
+      "shares": 1,
+      "price": 415.88,
+      "time": "2026-06-02 09:19",
+      "realized_pnl": -26.22
+    },
+    {
+      "action": "BUY",
+      "symbol": "NNE",
+      "shares": 33,
+      "price": 29.7,
+      "time": "2026-06-02 09:21",
+      "reasoning": "NNE meets all buy criteria with RSI at 60.48 (below 70), positive MACD histogram (0.3258), and above"
+    },
+    {
+      "action": "BUY",
+      "symbol": "DCO",
+      "shares": 8,
+      "price": 148.62,
+      "time": "2026-06-02 09:24",
+      "reasoning": "DCO meets all three buy criteria with RSI at 55.63 (below 70), positive MACD histogram (0.2822), and"
+    },
+    {
+      "action": "SELL",
+      "symbol": "GOOGL",
+      "shares": 2,
+      "price": 370.46,
+      "time": "2026-06-02 22:23",
+      "realized_pnl": -39.34
+    },
+    {
+      "action": "SELL",
+      "symbol": "NNE",
+      "shares": 33,
+      "price": 27.18,
+      "time": "2026-06-03 22:30",
+      "realized_pnl": -83.16
     }
   ],
-  "sessions": 3
+  "sessions": 35,
+  "peak_value": 10000.00,
+  "drawdown_halted": false
 }

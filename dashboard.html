@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
-    --bg:#f8f9fa;--surface:#fff;--surface2:#f3f4f6;--border:#e5e7eb;--border-light:#f0f1f3;
+    --bg:#f8f9fa;--bg2:#f3f4f6;--surface:#fff;--surface2:#f3f4f6;--border:#e5e7eb;--border-light:#f0f1f3;
     --text:#111827;--text2:#6b7280;--text3:#9ca3af;
     --green:#10b981;--green-bg:#ecfdf5;--red:#ef4444;--red-bg:#fef2f2;
     --blue:#3b82f6;--blue-bg:#eff6ff;--amber:#f59e0b;--purple:#8b5cf6;--cyan:#06b6d4;
@@ -133,6 +133,19 @@
   .insight-label{font-size:11px;font-weight:500;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.3px;}
   .insight-value{font-size:16px;font-weight:700;}
   .insight-sub{font-size:11px;color:var(--text3);margin-top:3px;}
+
+  .wl-cat { margin-bottom: 16px; }
+  .wl-cat-header { display:flex; align-items:center; justify-content:space-between; cursor:pointer; padding:10px 0; border-bottom:1px solid var(--border-light); margin-bottom:10px; }
+  .wl-cat-label { font-size:13px; font-weight:700; color:var(--text2); letter-spacing:.05em; text-transform:uppercase; }
+  .wl-cat-badge { font-size:11px; background:var(--bg2); color:var(--text3); border-radius:99px; padding:2px 8px; }
+  .wl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; }
+  .wl-card { background:var(--bg2); border-radius:10px; padding:12px 14px; border:1px solid var(--border-light); }
+  .wl-sym { font-size:13px; font-weight:700; color:var(--text); }
+  .wl-price { font-size:16px; font-weight:700; color:var(--text); margin:4px 0 2px; font-family:var(--mono); }
+  .wl-chg { font-size:12px; font-weight:600; }
+  .wl-held { font-size:11px; color:var(--text3); margin-top:4px; }
+  .wl-cat-body { overflow:hidden; transition:max-height .3s ease; }
+
 </style>
 </head>
 <body>
@@ -156,6 +169,7 @@
   <div class="tabs">
     <button class="tab active" onclick="switchTab('dashboard')">Dashboard</button>
     <button class="tab" onclick="switchTab('performance')">Performance</button>
+    <button class="tab" onclick="switchTab('market')">Live Market</button>
     <button class="tab" onclick="switchTab('skills')">Skills</button>
   </div>
 
@@ -221,6 +235,8 @@
     <div class="perf-stats">
       <div class="stat-card"><div class="stat-label">Portfolio Return</div><div class="stat-value" id="pReturn">—</div><div class="stat-sub">vs $10,000 start</div></div>
       <div class="stat-card"><div class="stat-label">S&P 500 Return</div><div class="stat-value blue" id="pSP500">—</div><div class="stat-sub">same period</div></div>
+      <div class="stat-card"><div class="stat-label">NASDAQ Today</div><div class="stat-value" id="pNASDAQ" style="color:#8b5cf6">—</div><div class="stat-sub">daily change</div></div>
+      <div class="stat-card"><div class="stat-label">Dow Jones Today</div><div class="stat-value" id="pDJIA" style="color:#f59e0b">—</div><div class="stat-sub">daily change</div></div>
       <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" id="pWinRate">—</div><div class="stat-sub" id="pWinSub">—</div></div>
       <div class="stat-card"><div class="stat-label">Realized P&L</div><div class="stat-value" id="pRPnl">—</div><div class="stat-sub">closed trades</div></div>
       <div class="stat-card"><div class="stat-label">Sessions Run</div><div class="stat-value" id="pSessions">—</div><div class="stat-sub">trading sessions</div></div>
@@ -264,6 +280,46 @@
 
   </div>
 
+
+  <div id="tab-market" class="tab-panel">
+    <div>
+      <div class="hero-label">Live Market</div>
+      <div style="font-size:28px;font-weight:700;letter-spacing:-1px;margin-bottom:8px">Stock Tracker</div>
+      <div style="font-size:14px;color:var(--text3)">Updates every 15 seconds &nbsp;<span id="mktLastUpdate" style="font-family:var(--mono);font-size:12px"></span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <div class="stat-card"><div class="stat-label">S&P 500</div><div class="stat-value" id="mktSP500Price">—</div><div class="stat-sub" id="mktSP500Chg">—</div></div>
+      <div class="stat-card"><div class="stat-label">NASDAQ</div><div class="stat-value" id="mktNASDAQPrice">—</div><div class="stat-sub" id="mktNASDAQChg">—</div></div>
+      <div class="stat-card"><div class="stat-label">Dow Jones</div><div class="stat-value" id="mktDJIAPrice">—</div><div class="stat-sub" id="mktDJIAChg">—</div></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Watchlist</div><div class="card-meta"><span id="mktStatus">Loading...</span></div></div>
+      <div class="card-body">
+        <div id="wl-tech" class="wl-cat"></div>
+        <div id="wl-nuclear" class="wl-cat"></div>
+        <div id="wl-defense" class="wl-cat"></div>
+        <div id="wl-retail" class="wl-cat"></div>
+        <div id="wl-food" class="wl-cat"></div>
+        <div id="wl-ai" class="wl-cat"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">Price Table</div><div class="card-meta">Live data from Yahoo Finance</div></div>
+      <div class="card-body tight">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">Symbol</th>
+            <th style="text-align:right;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">Price</th>
+            <th style="text-align:right;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">Change</th>
+            <th style="text-align:right;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">% Change</th>
+            <th style="text-align:right;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">Prev Close</th>
+            <th style="text-align:right;padding:10px 16px;font-size:12px;font-weight:600;color:var(--text3)">Your Position</th>
+          </tr></thead>
+          <tbody id="mktTableBody"><tr><td colspan="6" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
   <!-- ═══ SKILLS TAB ═══ -->
   <div id="tab-skills" class="tab-panel">
     <div>
@@ -289,7 +345,7 @@
 <script>
 const START=10000;
 const COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4'];
-let liveData=null, portfolioData=null, perfChart=null;
+let liveData=null, portfolioData=null, perfChart=null, marketInterval=null;
 
 // Clock
 setInterval(()=>{
@@ -310,6 +366,7 @@ function switchTab(name) {
     setTimeout(()=>document.querySelectorAll('.alloc-fill').forEach(e=>e.style.width=e.dataset.w+'%'),100);
   }
   if(name==='performance' && portfolioData && liveData) renderPerformance(portfolioData, liveData);
+  if(name==='market') { loadMarket(); if(marketInterval) clearInterval(marketInterval); marketInterval = setInterval(loadMarket, 15000); } else { if(marketInterval) { clearInterval(marketInterval); marketInterval = null; } }
 }
 
 // Load all data
@@ -479,9 +536,112 @@ function renderPerformance(d, live, perf) {
     <div class="insight-card"><div class="insight-label">Total Trades</div><div class="insight-value">${t.length}</div><div class="insight-sub">${winTrades}W / ${lossTrades}L</div></div>`;
 }
 
+
+
+
+const SECTORS = {
+  'Tech': ['AAPL','NVDA','TSLA','MSFT','GOOGL'],
+  'Nuclear': ['NNE','LEU','CEG','CCJ'],
+  'Defense': ['RDW','DCO'],
+  'Retail': ['COST','TJX'],
+  'Food': ['CAVA','CMG'],
+  'AI Infra': ['VRT','CRDO']
+};
+const SECTOR_IDS = {'Tech':'wl-tech','Nuclear':'wl-nuclear','Defense':'wl-defense','Retail':'wl-retail','Food':'wl-food','AI Infra':'wl-ai'};
+const SECTOR_OPEN = {'Tech':true,'Nuclear':true,'Defense':true,'Retail':true,'Food':true,'AI Infra':true};
+
+function toggleWatchlist() {
+  const body = document.getElementById('watchlistBody');
+  const chev = document.getElementById('watchlistChevron');
+  if (body.style.display === 'none') { body.style.display='block'; chev.textContent='▼'; }
+  else { body.style.display='none'; chev.textContent='▶'; }
+}
+
+function toggleSector(name) {
+  SECTOR_OPEN[name] = !SECTOR_OPEN[name];
+  renderWatchlist(window._lastPrices || {}, window._lastHoldings || {});
+}
+
+async function loadMarket() {
+  try {
+    const [priceRes, idxRes, portRes] = await Promise.all([
+      fetch('/prices?'+Date.now()),
+      fetch('/indices?'+Date.now()).catch(()=>null),
+      fetch('/portfolio.json?'+Date.now())
+    ]);
+    const live = await priceRes.json();
+    const idx = idxRes ? await idxRes.json() : {};
+    const port = await portRes.json();
+    const prices = live.prices || {};
+    const holdings = port.holdings || {};
+
+    // Status + timestamp
+    document.getElementById('mktStatus').textContent = 'Market '+(live.market_status||'Closed');
+    document.getElementById('mktLastUpdate').textContent = 'Updated '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+    // Index cards
+    const idxMap = {sp500:['mktSP500Price','mktSP500Chg'], nasdaq:['mktNASDAQPrice','mktNASDAQChg'], djia:['mktDJIAPrice','mktDJIAChg']};
+    for (const [key,[pId,cId]] of Object.entries(idxMap)) {
+      const d = idx[key];
+      if (d) {
+        document.getElementById(pId).textContent = d.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const up = d.change_pct >= 0;
+        const cEl = document.getElementById(cId);
+        cEl.textContent = (up?'+':'')+d.change.toFixed(2)+' ('+(up?'+':'')+d.change_pct.toFixed(2)+'%)';
+        cEl.style.color = up ? 'var(--green)' : 'var(--red)';
+      }
+    }
+
+    // Sector watchlist
+    renderWatchlist(prices, holdings);
+
+    // Price table
+    const body = document.getElementById('mktTableBody');
+    const syms = Object.keys(SECTORS).flatMap(s=>SECTORS[s]);
+    body.innerHTML = syms.map(s=>{
+      const p = prices[s], h = holdings[s];
+      if (!p) return '<tr style="border-bottom:1px solid var(--border-light)"><td style="padding:10px 16px;font-weight:600">'+s+'</td><td colspan="4" class="empty" style="text-align:right;padding:10px 16px">No data</td><td style="text-align:right;padding:10px 16px">'+(h?h.shares+' sh':'—')+'</td></tr>';
+      const up = p.change_pct >= 0, col = up ? 'var(--green)' : 'var(--red)';
+      const chg = (p.price - p.prev_close);
+      return '<tr style="border-bottom:1px solid var(--border-light)">'+
+        '<td style="padding:10px 16px;font-weight:600">'+s+'</td>'+
+        '<td style="text-align:right;padding:10px 16px;font-family:var(--mono)">$'+p.price.toFixed(2)+'</td>'+
+        '<td style="text-align:right;padding:10px 16px;font-family:var(--mono);color:'+col+'">'+(up?'+':'')+chg.toFixed(2)+'</td>'+
+        '<td style="text-align:right;padding:10px 16px;color:'+col+';font-weight:600">'+(up?'+':'')+p.change_pct.toFixed(2)+'%</td>'+
+        '<td style="text-align:right;padding:10px 16px;font-family:var(--mono);color:var(--text3)">$'+p.prev_close.toFixed(2)+'</td>'+
+        '<td style="text-align:right;padding:10px 16px;color:var(--text2)">'+(h?h.shares+' @ $'+h.avg_price:'—')+'</td>'+
+        '</tr>';
+    }).join('');
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function renderWatchlist(prices, holdings) {
+  window._lastPrices = prices;
+  window._lastHoldings = holdings;
+  for (const [sector, syms] of Object.entries(SECTORS)) {
+    const id = SECTOR_IDS[sector];
+    const open = SECTOR_OPEN[sector];
+    const cards = syms.map(s => {
+      const p = prices[s];
+      const h = holdings[s];
+      const color = !p ? 'var(--text3)' : p.change_pct > 0 ? 'var(--green)' : p.change_pct < 0 ? 'var(--red)' : 'var(--text2)';
+      const arrow = !p ? '' : p.change_pct > 0 ? '▲' : p.change_pct < 0 ? '▼' : '—';
+      const heldStr = h ? '<div class="wl-held">Holding '+h.shares+' @ $'+h.avg_price+'</div>' : '';
+      return '<div class="wl-card"><div class="wl-sym">'+s+'</div><div class="wl-price">'+(p ? '$'+p.price.toFixed(2) : '—')+'</div><div class="wl-chg" style="color:'+color+'">'+(p ? arrow+' '+(p.change_pct>=0?'+':'')+p.change_pct.toFixed(2)+'%' : 'No data')+'</div>'+heldStr+'</div>';
+    }).join('');
+    document.getElementById(id).innerHTML = '<div class="wl-cat-header" onclick="toggleSector(\'' + sector + '\')">' +
+      '<span class="wl-cat-label">'+sector+'</span>' +
+      '<div style="display:flex;align-items:center;gap:8px"><span class="wl-cat-badge">'+syms.length+' stocks</span><span style="color:var(--text3);font-size:14px">'+(open?'▼':'▶')+'</span></div>' +
+      '</div>' +
+      '<div class="wl-cat-body" style="max-height:'+(open?'500px':'0')+'"><div class="wl-grid">'+cards+'</div></div>';
+  }
+}
+
 loadAll();
-setInterval(()=>{ if(liveData&&liveData.market_open) loadAll(); },60000);
-setInterval(()=>{ if(liveData&&!liveData.market_open) loadAll(); },300000);
+setInterval(function(){ if(liveData && liveData.market_open) loadAll(); }, 60000);
+setInterval(function(){ if(liveData && !liveData.market_open) loadAll(); }, 300000);
 </script>
 </body>
 </html>

@@ -9,8 +9,13 @@ from datetime import datetime
 import pytz
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 
-from config import ADVANCED_LAYER_WEIGHTS, ADVANCED_CAP
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+from config import (ADVANCED_LAYER_WEIGHTS, ADVANCED_CAP,
+                    ATR_STOP_MULT, ATR_TARGET_MULT,
+                    DRAWDOWN_CIRCUIT_BREAKER, DRAWDOWN_RESUME_PCT)
 from advanced_strategies import find_cointegrated_pairs, train_ml_model, combine_signals
 
 STARTING_CASH = 10000.00
@@ -54,8 +59,10 @@ def get_advanced_cache(frame):
     _ADV_CACHE["date"] = today
     return model, pairs
 
-def _fmt_adv_detail(symbol, adv_detail):
-    """Format per-symbol advanced signal breakdown for Obsidian logging."""
+def _fmt_adv_detail(symbol, adv_detail, adv_contrib=None):
+    """Format per-symbol advanced signal breakdown for Obsidian logging.
+    Example: regime=TREND(+2) | ml=0.61(+1) | pairs=none | adv_total=+2
+    """
     if not adv_detail:
         return "none"
     reg = adv_detail.get("regime", {}).get(symbol, {})
@@ -64,17 +71,22 @@ def _fmt_adv_detail(symbol, adv_detail):
         (f"{k}(z={v['z']:+.1f})" for k, v in adv_detail.get("pairs", {}).items() if symbol in k),
         "none"
     )
-    reg_str = (f"{reg.get('regime','?')}({reg.get('score', 0):+d} {reg.get('strategy','?')})"
+    reg_str = (f"{reg.get('regime','?')}({reg.get('score', 0):+d})"
                if reg else "none")
-    ml_str  = (f"prob_up={ml.get('prob_up', 0):.2f}({ml.get('score', 0):+d})"
+    ml_str  = (f"{ml.get('prob_up', 0):.2f}({ml.get('score', 0):+d})"
                if ml else "none")
-    return f"regime={reg_str} | ml={ml_str} | pairs={pair_str}"
+    total_str = f" | adv_total={adv_contrib:+d}" if adv_contrib is not None else ""
+    return f"regime={reg_str} | ml={ml_str} | pairs={pair_str}{total_str}"
 
 def load_portfolio():
     if os.path.exists(PORTFOLIO_FILE):
         with open(PORTFOLIO_FILE) as f:
-            return json.load(f)
-    return {"cash": STARTING_CASH, "holdings": {}, "trades": [], "sessions": 0}
+            p = json.load(f)
+        p.setdefault("peak_value", STARTING_CASH)
+        p.setdefault("drawdown_halted", False)
+        return p
+    return {"cash": STARTING_CASH, "holdings": {}, "trades": [], "sessions": 0,
+            "peak_value": STARTING_CASH, "drawdown_halted": False}
 
 def save_portfolio(p):
     with open(PORTFOLIO_FILE, "w") as f:
@@ -120,6 +132,24 @@ def calculate_macd(prices):
     histogram = macd_line - signal_line
     return round(float(macd_line[-1]), 4), round(float(signal_line[-1]), 4), round(float(histogram[-1]), 4)
 
+def calculate_atr(hist, period=14):
+    """Wilder's ATR-14 from a yfinance history DataFrame."""
+    if len(hist) < period + 1:
+        return None
+    high  = hist["High"].values.astype(float)
+    low   = hist["Low"].values.astype(float)
+    close = hist["Close"].values.astype(float)
+    tr = np.maximum(
+        high[1:] - low[1:],
+        np.maximum(np.abs(high[1:] - close[:-1]),
+                   np.abs(low[1:]  - close[:-1]))
+    )
+    atr = np.empty(len(tr))
+    atr[0] = np.mean(tr[:period])
+    for i in range(period, len(tr)):
+        atr[i] = (atr[i - 1] * (period - 1) + tr[i]) / period
+    return round(float(atr[-1]), 4)
+
 def get_stock_data(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -138,11 +168,13 @@ def get_stock_data(symbol):
         recent_low = round(float(np.min(closes[-20:])), 2)
         price_range = recent_high - recent_low
         price_pos = round((current - recent_low) / price_range * 100, 1) if price_range > 0 else 50
+        atr = calculate_atr(hist)
         return {
             "symbol": symbol, "price": current, "change_pct": round((current-prev)/prev*100,2),
             "volume": int(volumes[-1]), "volume_ratio": vol_ratio,
             "rsi": rsi, "macd_histogram": macd_hist, "macd": macd, "macd_signal": macd_sig,
-            "trend_5d": trend_5d, "recent_high": recent_high, "recent_low": recent_low, "price_position": price_pos
+            "trend_5d": trend_5d, "recent_high": recent_high, "recent_low": recent_low,
+            "price_position": price_pos, "atr": atr,
         }
     except Exception as e:
         print(f"  Error: {e}")
@@ -202,11 +234,24 @@ def check_stop_take(portfolio, data):
     if sym not in portfolio["holdings"]:
         return None, None
     h = portfolio["holdings"][sym]
-    pnl_pct = (data["price"] - h["avg_price"]) / h["avg_price"]
-    if pnl_pct <= -STOP_LOSS_PCT:
-        return "SELL", f"STOP-LOSS: {round(pnl_pct*100,2)}% loss"
-    if pnl_pct >= TAKE_PROFIT_PCT:
-        return "SELL", f"TAKE-PROFIT: +{round(pnl_pct*100,2)}% gain"
+    entry = h["avg_price"]
+    price = data["price"]
+    atr   = h.get("atr")  # stored at entry time; None for legacy holdings
+    if atr is not None:
+        stop_price   = entry - atr * ATR_STOP_MULT
+        target_price = entry + atr * ATR_TARGET_MULT
+        pnl_pct = (price - entry) / entry * 100
+        if price <= stop_price:
+            return "SELL", f"ATR-STOP: {pnl_pct:+.2f}% (stop=${stop_price:.2f}, ATR={atr:.2f})"
+        if price >= target_price:
+            return "SELL", f"ATR-TARGET: {pnl_pct:+.2f}% (target=${target_price:.2f}, ATR={atr:.2f})"
+    else:
+        # Legacy percentage stops for holdings entered before ATR support
+        pnl_pct = (price - entry) / entry
+        if pnl_pct <= -STOP_LOSS_PCT:
+            return "SELL", f"STOP-LOSS: {pnl_pct*100:+.2f}% loss"
+        if pnl_pct >= TAKE_PROFIT_PCT:
+            return "SELL", f"TAKE-PROFIT: {pnl_pct*100:+.2f}% gain"
     return None, None
 
 def ask_claude(data, portfolio, headlines, signals, score, sp500):
@@ -257,7 +302,7 @@ def parse_decision(response):
         elif line.startswith("REASONING:"): reasoning = line.split(":",1)[1].strip()
     return decision, shares, confidence, reasoning
 
-def execute_trade(portfolio, decision, shares, symbol, price, reasoning):
+def execute_trade(portfolio, decision, shares, symbol, price, reasoning, atr=None):
     perf = load_performance()
     if decision == "BUY" and shares > 0:
         cost = shares * price
@@ -272,8 +317,10 @@ def execute_trade(portfolio, decision, shares, symbol, price, reasoning):
             total_s = h["shares"] + shares
             h["avg_price"] = round((h["shares"]*h["avg_price"] + cost) / total_s, 2)
             h["shares"] = total_s
+            if atr is not None:
+                h["atr"] = atr  # refresh ATR on scale-in
         else:
-            portfolio["holdings"][symbol] = {"shares": shares, "avg_price": price}
+            portfolio["holdings"][symbol] = {"shares": shares, "avg_price": price, "atr": atr}
         portfolio["trades"].append({"action":"BUY","symbol":symbol,"shares":shares,"price":price,"time":datetime.now().strftime("%Y-%m-%d %H:%M"),"reasoning":reasoning[:100]})
         print(f"  ✅ BUY {shares} shares of {symbol} @ ${price}")
     elif decision == "SELL" and symbol in portfolio["holdings"]:
@@ -289,12 +336,12 @@ def execute_trade(portfolio, decision, shares, symbol, price, reasoning):
         save_performance(perf)
         print(f"  ✅ SELL {h['shares']} shares of {symbol} @ ${price} | P&L: ${pnl:+.2f}")
 
-def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data, signals, score, adv_detail=None):
+def log_to_obsidian(symbol, decision, shares, price, confidence, reasoning, data, signals, score, adv_detail=None, adv_contrib=None):
     trades_dir = os.path.join(VAULT, "Trades")
     os.makedirs(trades_dir, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d")
     bias = "BULLISH" if score >= 3 else "BEARISH" if score <= -3 else "NEUTRAL"
-    adv_line = _fmt_adv_detail(symbol, adv_detail)
+    adv_line = _fmt_adv_detail(symbol, adv_detail, adv_contrib)
     content = f"""# {symbol} — {decision} — {date_str}
 **Action:** {decision} {shares} shares @ ${price} | **Confidence:** {confidence}
 
@@ -322,6 +369,8 @@ def run_trading_session():
     print(f"🤖 FridayTrader v3 — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"📊 S&P 500: {sp500_change:+.2f}% | Cash: ${portfolio['cash']:,.2f}")
     print(f"Holdings: {list(portfolio['holdings'].keys())}")
+    if portfolio.get("drawdown_halted"):
+        print(f"  ⚠️  Drawdown circuit breaker ACTIVE — new BUYs halted until recovery")
     print(f"{'='*55}\n")
     # ── Build advanced signals once for this session ──────────────────────────
     adv_combined, adv_detail = {}, {}
@@ -365,12 +414,32 @@ def run_trading_session():
         decision, shares, confidence, reasoning = parse_decision(response)
         print(f"  Decision: {decision} {shares} shares ({confidence})")
         print(f"  {reasoning[:80]}")
+        if decision == "BUY" and portfolio.get("drawdown_halted"):
+            print(f"  🚫 BUY blocked: drawdown circuit breaker active")
+            decision = "HOLD"
         if decision in ("BUY", "SELL"):
-            execute_trade(portfolio, decision, shares, symbol, data["price"], reasoning)
+            execute_trade(portfolio, decision, shares, symbol, data["price"], reasoning,
+                          atr=data.get("atr"))
         else:
             print(f"  ⏸️  HOLD")
-        log_to_obsidian(symbol, decision, shares, data["price"], confidence, reasoning, data, signals, blended_score, adv_detail)
+        log_to_obsidian(symbol, decision, shares, data["price"], confidence, reasoning,
+                        data, signals, blended_score, adv_detail, adv_contrib)
     total = portfolio["cash"] + sum(h["shares"]*current_prices.get(s, h["avg_price"]) for s,h in portfolio["holdings"].items())
+
+    # ── Drawdown circuit breaker: update peak and halted flag ─────────────────
+    peak = portfolio.get("peak_value", STARTING_CASH)
+    if total > peak:
+        portfolio["peak_value"] = total
+        peak = total
+    dd_pct = (peak - total) / peak if peak > 0 else 0.0
+    if dd_pct >= DRAWDOWN_CIRCUIT_BREAKER and not portfolio.get("drawdown_halted"):
+        portfolio["drawdown_halted"] = True
+        print(f"  🚨 Drawdown circuit breaker TRIGGERED: {dd_pct*100:.1f}% below peak (${peak:,.2f})")
+    elif portfolio.get("drawdown_halted") and dd_pct < DRAWDOWN_RESUME_PCT:
+        portfolio["drawdown_halted"] = False
+        print(f"  ✅ Drawdown circuit breaker CLEARED: {dd_pct*100:.1f}% below peak")
+    # ─────────────────────────────────────────────────────────────────────────
+
     pnl = total - STARTING_CASH
     perf = load_performance()
     if not perf.get("sp500_start") and sp500_price:

@@ -1,11 +1,16 @@
 import schedule
 import time
 import subprocess
+import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 def run_agent():
     print(f"\n⏰ Auto-running FridayTrader at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    subprocess.run(["python3", "/Users/vedantnogaja/Documents/FridayTrader/friday_trader_v3.py"])
+    subprocess.run(["python3", "/Users/vedantnogaja/Documents/FridayTrader/friday_trader_v3.py"],
+                   env={**os.environ})
 
 print("🤖 FridayTrader Auto-Scheduler Started!")
 print("📅 Will run Monday-Friday at 10:00 AM Singapore time")
